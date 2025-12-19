@@ -1,0 +1,16 @@
+{
+  "employees": [
+    {
+      "id": "EMP001",
+      "name": "Arya Nakshathra",
+      "role": "AI Intern",
+      "face_id": "face_001"
+    },
+    {
+      "id": "EMP002",
+      "name": "Rithanya",
+      "role": "Developer",
+      "face_id": "face_002"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+# Flutter
+build/
+.dart_tool/
+.packages
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android
+android/.gradle/
+android/local.properties
+
+# iOS / macOS
+ios/Pods/
+macos/Pods/
+
+# Web
+web/.dart_tool/
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environments
+faceenv/
+venv/
+.env/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Avoid recursion
+working_emu/
+
+# IDE files
+.idea/
+*.iml

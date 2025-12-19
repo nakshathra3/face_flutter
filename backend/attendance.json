@@ -1,0 +1,32 @@
+{
+  "records": [
+    {
+      "employee_id": "int013",
+      "name": "arya",
+      "date": "2025-12-19",
+      "time": "11:36:50",
+      "status": "Present"
+    },
+    {
+      "employee_id": "int007",
+      "name": "ben",
+      "date": "2025-12-19",
+      "time": "11:38:23",
+      "status": "Present"
+    },
+    {
+      "employee_id": "int007",
+      "name": "ben",
+      "date": "2025-12-19",
+      "time": "11:38:32",
+      "status": "Present"
+    },
+    {
+      "employee_id": "int013",
+      "name": "arya",
+      "date": "2025-12-19",
+      "time": "11:53:23",
+      "status": "Present"
+    }
+  ]
+}
