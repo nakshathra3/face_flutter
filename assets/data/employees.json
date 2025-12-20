@@ -1,16 +1,152 @@
 {
   "employees": [
     {
-      "id": "EMP001",
-      "name": "Arya Nakshathra",
-      "role": "AI Intern",
-      "face_id": "face_001"
-    },
-    {
-      "id": "EMP002",
-      "name": "Rithanya",
-      "role": "Developer",
-      "face_id": "face_002"
-    }
+      "type": "employee",
+      "code": "DM015",
+      "full_name": "Dinesh C"
+  },
+  {
+      "type": "employee",
+      "code": "DM753",
+      "full_name": "gokul gokul"
+  },
+  {
+      "type": "employee",
+      "code": "DM0111",
+      "full_name": "hbbwahdb hjbahBJH"
+  },
+  {
+      "type": "employee",
+      "code": "DM9888",
+      "full_name": "hgjkl rahul gvhbjnkml"
+  },
+  {
+      "type": "employee",
+      "code": "DM0056",
+      "full_name": "huian ajnn"
+  },
+  {
+      "type": "employee",
+      "code": "DM8975",
+      "full_name": "ijijuh ijijoi"
+  },
+  {
+      "type": "employee",
+      "code": "DM446",
+      "full_name": "jaan jaan"
+  },
+  {
+      "type": "employee",
+      "code": "DM8562",
+      "full_name": "jj jjn"
+  },
+  {
+      "type": "employee",
+      "code": "DM7847",
+      "full_name": "jndnk kjnjnk"
+  },
+  {
+      "type": "employee",
+      "code": "DM088",
+      "full_name": "K.L. Rahul"
+  },
+  {
+      "type": "employee",
+      "code": "DM5445",
+      "full_name": "lal lal"
+  },
+  {
+      "type": "employee",
+      "code": "DM6546",
+      "full_name": "lalith nwdkjnjdn"
+  },
+  {
+      "type": "employee",
+      "code": "DM0066",
+      "full_name": "lalith raj"
+  },
+  {
+      "type": "employee",
+      "code": "DM5124",
+      "full_name": "lekha lekha"
+  },
+  {
+      "type": "employee",
+      "code": "DM8898",
+      "full_name": "log log"
+  },
+  {
+      "type": "employee",
+      "code": "DM0234",
+      "full_name": "praveen prave"
+  },
+  {
+      "type": "employee",
+      "code": "DM7997",
+      "full_name": "summa1 summa1"
+  },
+  {
+      "type": "employee",
+      "code": "DM002",
+      "full_name": "test test"
+  },
+  {
+      "type": "employee",
+      "code": "DM001",
+      "full_name": "testing testing"
+  },
+  {
+      "type": "employee",
+      "code": "DM0862",
+      "full_name": "testing78 testingnraj"
+  },
+  {
+      "type": "employee",
+      "code": "DM0011",
+      "full_name": "testtting testtttter"
+  },
+  {
+      "type": "employee",
+      "code": "DM1221",
+      "full_name": "tharani rokthik"
+  },
+  {
+      "type": "employee",
+      "code": "DM990",
+      "full_name": "uiop uiop"
+  }
+],
+"interns": [
+  {
+      "type": "intern",
+      "code": "INT5456",
+      "full_name": "amdlkm mklawmlkm"
+  },
+  {
+      "type": "intern",
+      "code": "INT9849",
+      "full_name": "jkansjknj jnakjndj"
+  },
+  {
+      "type": "intern",
+      "code": "INT0200",
+      "full_name": "jkwdakn jnawnjk"
+  },
+  {
+      "type": "intern",
+      "code": "INT5784",
+      "full_name": "tst TEST"
+  },
+  {
+      "type": "intern",
+      "code": "INT555",
+      "full_name": "vel vel"
+  },
+  {
+      "type": "intern",
+      "code": "INT5649",
+      "full_name": "wjand kjnajknjkdn"
+  }
+  
   ]
-}
+} 

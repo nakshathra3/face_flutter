@@ -1,29 +1,34 @@
 class Employee {
-  final String id;
-  final String name;
-  final String role;
+  final String code;
+  final String fullName;
+  final String type; // "employee" or "intern"
   String lastEmotion;
 
   Employee({
-    required this.id,
-    required this.name,
-    required this.role,
+    required this.code,
+    required this.fullName,
+    required this.type,
     this.lastEmotion = "",
   });
 
+  // Getter for backward compatibility
+  String get id => code;
+  String get name => fullName;
+  String get role => type;
+
   factory Employee.fromJson(Map<String, dynamic> json) {
     return Employee(
-      id: json['id'],
-      name: json['name'],
-      role: json['role'],
+      code: json['code'] ?? '',
+      fullName: json['full_name'] ?? '',
+      type: json['type'] ?? 'employee',
       lastEmotion: json['last_emotion'] ?? "",
     );
   }
 
   Map<String, dynamic> toJson() => {
-        "id": id,
-        "name": name,
-        "role": role,
+        "code": code,
+        "full_name": fullName,
+        "type": type,
         "last_emotion": lastEmotion,
       };
 }
