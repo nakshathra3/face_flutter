@@ -65,6 +65,78 @@ def get_emotion(img):
         print("❌ EMOTION DETECTION ERROR:", e)
         return "neutral"
 
+def detect_liveness(img):
+    """
+    Anti-spoofing detection to check if image is from live camera or video/photo.
+    Returns: (is_live: bool, confidence: float, reason: str)
+    """
+    try:
+        # Method 1: Check image variance (live cameras have more variance)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        variance = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # Method 2: Check for screen reflection artifacts (common in video spoofing)
+        # High variance in edge detection suggests live feed
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = np.sum(edges > 0) / (edges.shape[0] * edges.shape[1])
+        
+        # Method 3: Check image sharpness (live cameras are usually sharper)
+        sharpness = variance
+        
+        # Method 4: Use DeepFace liveness detection if available
+        try:
+            liveness_result = DeepFace.analyze(
+                img_path=img,
+                actions=['real'],
+                enforce_detection=False
+            )
+            if isinstance(liveness_result, list):
+                liveness_result = liveness_result[0]
+            
+            # Check if 'real' key exists (some models return this)
+            if 'real' in liveness_result:
+                real_score = liveness_result.get('real', 0)
+                if real_score > 0.5:
+                    return (True, real_score, "Liveness detected")
+        except:
+            pass  # Fall back to other methods
+        
+        # More lenient thresholds - only flag obvious spoofing attempts
+        # Very low thresholds to avoid false positives
+        MIN_VARIANCE = 20  # Very low threshold - most images will pass
+        MIN_EDGE_DENSITY = 0.01  # Very low threshold
+        MIN_SHARPNESS = 10  # Very low threshold
+        
+        # Only flag as spoofing if ALL metrics are extremely low (suggests static image/video)
+        # This is more conservative - we only reject obvious cases
+        is_spoofed = (
+            variance < MIN_VARIANCE and
+            edge_density < MIN_EDGE_DENSITY and
+            sharpness < MIN_SHARPNESS
+        )
+        
+        # If variance is extremely low (< 5), it's likely a static image
+        # But we need to be careful not to reject legitimate low-light images
+        if variance < 5 and edge_density < 0.005:
+            is_spoofed = True
+        
+        is_live = not is_spoofed
+        
+        confidence = min(1.0, max(0.0, (variance / 100) * 0.5 + (edge_density / 0.1) * 0.5))
+        
+        if is_spoofed:
+            reason = f"Spoofing detected (variance: {variance:.1f}, edges: {edge_density:.3f})"
+        else:
+            reason = "Live camera detected"
+        
+        print(f"🔍 Liveness check: variance={variance:.1f}, edges={edge_density:.3f}, is_live={is_live}")
+        
+        return (is_live, confidence, reason)
+    except Exception as e:
+        print(f"⚠️ Liveness detection error: {e}")
+        # If detection fails, assume live (to avoid false positives)
+        return (True, 0.5, "Liveness check failed, assuming live")
+
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
@@ -98,12 +170,22 @@ def enroll():
                 "message": "Invalid image data"
             }), 400
 
+        # Anti-spoofing: Check if image is from live camera
+        # Only check for obvious spoofing - be lenient to avoid false positives
+        is_live, liveness_confidence, liveness_reason = detect_liveness(img)
+        if not is_live and liveness_confidence < 0.1:  # Only reject if very low confidence
+            print(f"🚫 SPOOFING DETECTED during enrollment: {liveness_reason}")
+            return jsonify({
+                "success": False,
+                "message": "Failed to recognize - Please use live camera, not video or photo"
+            }), 400
+
         embedding = get_embedding(img)
 
         if embedding is None:
             return jsonify({
                 "success": False,
-                "message": "Face not detected. Try again."
+                "message": "Failed to recognize - Face not detected. Try again."
             }), 400
 
         db = load_json(EMPLOYEE_FILE)
@@ -160,7 +242,17 @@ def recognize():
         if img is None:
             return jsonify({
                 "matched": False,
-                "message": "Invalid image data"
+                "message": "Failed to recognize - Invalid image data"
+            }), 400
+
+        # Anti-spoofing: Check if image is from live camera
+        # Only check for obvious spoofing - be lenient to avoid false positives
+        is_live, liveness_confidence, liveness_reason = detect_liveness(img)
+        if not is_live and liveness_confidence < 0.1:  # Only reject if very low confidence
+            print(f"🚫 SPOOFING DETECTED: {liveness_reason}")
+            return jsonify({
+                "matched": False,
+                "message": "Failed to recognize - Please use live camera, not video or photo"
             }), 400
 
         live_embedding = get_embedding(img)
@@ -168,7 +260,7 @@ def recognize():
         if live_embedding is None:
             return jsonify({
                 "matched": False,
-                "message": "Face not detected"
+                "message": "Failed to recognize - Face not detected"
             }), 400
 
         # Get emotion
@@ -197,7 +289,7 @@ def recognize():
         if best_match is None or best_score < DISTANCE_THRESHOLD:
             return jsonify({
                 "matched": False,
-                "message": f"Face not recognized (score: {round(best_score, 3)})"
+                "message": f"Failed to recognize - Face not found in database (confidence: {round(best_score, 3)})"
             }), 400
 
         today = datetime.now().strftime("%Y-%m-%d")

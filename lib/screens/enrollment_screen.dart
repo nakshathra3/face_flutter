@@ -197,13 +197,14 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
       } else {
         setState(() {
           _processing = false;
-          _statusText = "❌ Face not detected. Try again";
+          _statusText = "❌ Failed to recognize";
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("❌ Face not detected. Try again"),
+            content: Text("❌ Failed to recognize - Please use live camera"),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
           ),
         );
       }

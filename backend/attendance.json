@@ -5,6 +5,68 @@
       "name": "lalith nwdkjnjdn",
       "date": "2025-12-20",
       "clock_in": "13:42:07",
+      "clock_out": "16:58:06",
+      "hours_worked": 3.27
+    },
+    {
+      "employee_id": "DM088",
+      "name": "K.L. Rahul",
+      "date": "2025-12-20",
+      "clock_in": "16:55:43",
+      "clock_out": "16:56:16",
+      "hours_worked": 0.01
+    },
+    {
+      "employee_id": "DM5445",
+      "name": "lal lal",
+      "date": "2025-12-20",
+      "clock_in": "17:01:10",
+      "clock_out": null
+    },
+    {
+      "employee_id": "DM8562",
+      "name": "jj jjn",
+      "date": "2025-12-20",
+      "clock_in": "17:07:23",
+      "clock_out": "17:12:01",
+      "hours_worked": 0.08
+    },
+    {
+      "employee_id": "DM6546",
+      "name": "lalith nwdkjnjdn",
+      "date": "2025-12-20",
+      "clock_in": "17:14:26",
+      "clock_out": "18:48:34",
+      "hours_worked": 1.57
+    },
+    {
+      "employee_id": "DM015",
+      "name": "Dinesh C",
+      "date": "2025-12-20",
+      "clock_in": "17:19:01",
+      "clock_out": "17:19:47",
+      "hours_worked": 0.01
+    },
+    {
+      "employee_id": "DM088",
+      "name": "K.L. Rahul",
+      "date": "2025-12-20",
+      "clock_in": "18:22:34",
+      "clock_out": "18:47:53",
+      "hours_worked": 0.42
+    },
+    {
+      "employee_id": "DM088",
+      "name": "K.L. Rahul",
+      "date": "2025-12-20",
+      "clock_in": "18:48:07",
+      "clock_out": null
+    },
+    {
+      "employee_id": "DM6546",
+      "name": "lalith nwdkjnjdn",
+      "date": "2025-12-20",
+      "clock_in": "20:22:05",
       "clock_out": null
     }
   ]

@@ -11,9 +11,40 @@ class CameraPreviewWidget extends StatelessWidget {
     if (!controller.value.isInitialized) {
       return const Center(child: CircularProgressIndicator());
     }
-    return AspectRatio(
-      aspectRatio: controller.value.aspectRatio,
-      child: CameraPreview(controller),
+
+    final aspectRatio = controller.value.aspectRatio;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final previewAspectRatio = aspectRatio;
+
+        // Calculate the size that fits within constraints while maintaining aspect ratio
+        double widgetWidth = width;
+        double widgetHeight = width / previewAspectRatio;
+
+        // If height exceeds constraints, scale down
+        if (widgetHeight > height) {
+          widgetHeight = height;
+          widgetWidth = height * previewAspectRatio;
+        }
+
+        return Center(
+          child: SizedBox(
+            width: widgetWidth,
+            height: widgetHeight,
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: controller.value.previewSize?.height ?? width,
+                height: controller.value.previewSize?.width ?? height,
+                child: CameraPreview(controller),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

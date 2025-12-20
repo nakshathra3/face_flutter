@@ -128,9 +128,14 @@ class _ClockScreenState extends State<ClockScreen> {
           ),
         );
       } else {
-        final errorMsg = response["message"] ?? "Face not recognized";
+        final errorMsg = response["message"] ?? "Failed to recognize";
+        // Ensure message starts with "Failed to recognize" if it doesn't already
+        final displayMsg = errorMsg.contains("Failed to recognize")
+            ? errorMsg
+            : "Failed to recognize - $errorMsg";
+
         setState(() {
-          _statusText = errorMsg;
+          _statusText = displayMsg;
           _success = false;
           _recognizedImageBase64 = null;
           _emotion = null;
@@ -141,9 +146,9 @@ class _ClockScreenState extends State<ClockScreen> {
         // Show error snackbar
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMsg),
+            content: Text(displayMsg),
             backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -304,7 +309,21 @@ class _ClockScreenState extends State<ClockScreen> {
                               ],
                             ),
                             child: ClipOval(
-                              child: CameraPreview(_controller!),
+                              child: AspectRatio(
+                                aspectRatio: _controller!.value.aspectRatio,
+                                child: FittedBox(
+                                  fit: BoxFit.cover,
+                                  child: SizedBox(
+                                    width: _controller!
+                                            .value.previewSize?.height ??
+                                        260,
+                                    height:
+                                        _controller!.value.previewSize?.width ??
+                                            260,
+                                    child: CameraPreview(_controller!),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
 
