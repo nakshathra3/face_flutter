@@ -68,6 +68,42 @@
       "date": "2025-12-20",
       "clock_in": "20:22:05",
       "clock_out": null
+    },
+    {
+      "employee_id": "DM088",
+      "name": "K.L. Rahul",
+      "date": "2025-12-21",
+      "clock_in": "20:05:58",
+      "clock_out": "20:18:37",
+      "hours_worked": 0.21
+    },
+    {
+      "employee_id": "DM088",
+      "name": "K.L. Rahul",
+      "date": "2025-12-21",
+      "clock_in": "20:20:28",
+      "clock_out": null
+    },
+    {
+      "employee_id": "DM5445",
+      "name": "lal lal",
+      "date": "2025-12-21",
+      "clock_in": "20:24:53",
+      "clock_out": null
+    },
+    {
+      "employee_id": "DM088",
+      "name": "K.L. Rahul",
+      "date": "2025-12-22",
+      "clock_in": "01:56:21",
+      "clock_out": null
+    },
+    {
+      "employee_id": "DM8562",
+      "name": "jj jjn",
+      "date": "2025-12-22",
+      "clock_in": "02:07:39",
+      "clock_out": null
     }
   ]
 }

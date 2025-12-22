@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+// import '../models/employee.dart' as Employee;
+import '../models/employee.dart';
+import '../models/attendance.dart';
 
 class ApiService {
   // ⚠️ IMPORTANT: Update this IP address to match your computer's IP
@@ -11,7 +14,8 @@ class ApiService {
   //static const String _baseUrl = "http://192.168.0.131:5000";
   // Updated IP addresses found: 192.168.56.1 (VirtualBox) or 192.168.29.91 (Main network)
   // For Android Emulator, change to: "http://10.0.2.2:5000"
-  static const String _baseUrl = "http://192.168.29.91:5000";
+  // static const String _baseUrl = "http://192.168.29.91:5000";
+  static const String _baseUrl = "https://dmemployee.upskilllabs.in";
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
@@ -61,22 +65,28 @@ class ApiService {
     }
   }
 
-  static Future<List<dynamic>> fetchAttendance() async {
+  static Future<List<Attendance>> fetchAttendance() async {
     try {
-      final response = await http
-          .get(
-        Uri.parse("$_baseUrl/attendance"),
-      )
-          .timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception("Request timeout");
-        },
-      );
+      final response =
+          await http.get(Uri.parse("$_baseUrl/attendance")).timeout(
+                const Duration(seconds: 10),
+                onTimeout: () => throw Exception("Request timeout"),
+              );
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['records'] ?? [];
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is List) {
+          return decoded.map((json) => Attendance.fromJson(json)).toList();
+        }
+
+        if (decoded is Map && decoded['records'] is List) {
+          return (decoded['records'] as List)
+              .map((json) => Attendance.fromJson(json))
+              .toList();
+        }
+
+        return [];
       } else {
         return [];
       }
@@ -112,10 +122,11 @@ class ApiService {
     }
   }
 
-  static Future<bool> enrollEmployee({
+  static Future<Map<String, dynamic>> enrollEmployee({
     required String employeeId,
     required String name,
     required String faceBase64,
+    required String uuid,
   }) async {
     try {
       final response = await http
@@ -126,6 +137,7 @@ class ApiService {
           "employee_id": employeeId,
           "name": name,
           "face": faceBase64,
+          "uuid": uuid,
         }),
       )
           .timeout(
@@ -137,15 +149,46 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data["success"] == true;
+        print('data: $data');
+        return {
+          "success": data["success"] == true,
+          "message": data["message"] ??
+              (data["success"] == true
+                  ? "Enrollment successful"
+                  : "Enrollment failed"),
+        };
       } else {
-        print("Enrollment failed with status: ${response.statusCode}");
-        print("Response: ${response.body}");
-        return false;
+        try {
+          final errorData = jsonDecode(response.body);
+          final errorMessage = errorData["message"] ?? "Enrollment failed";
+          print("Enrollment failed with status: ${response.statusCode}");
+          print("Response: ${response.body}");
+          return {
+            "success": false,
+            "message": errorMessage,
+          };
+        } catch (e) {
+          return {
+            "success": false,
+            "message": "Server error: ${response.statusCode}",
+          };
+        }
       }
     } catch (e) {
       print("Enrollment error: $e");
-      rethrow; // Re-throw so the screen can show the error
+      String errorMessage = "Network error";
+      if (e.toString().contains("Failed host lookup") ||
+          e.toString().contains("Connection refused")) {
+        errorMessage = "Cannot connect to server. Is backend running?";
+      } else if (e.toString().contains("timeout")) {
+        errorMessage = "Request timeout. Server may be slow.";
+      } else {
+        errorMessage = e.toString().replaceAll("Exception: ", "");
+      }
+      return {
+        "success": false,
+        "message": errorMessage,
+      };
     }
   }
 }

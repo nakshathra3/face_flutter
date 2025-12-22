@@ -2,11 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:working_emu/models/attendance.dart';
 
 import '../services/api_service.dart';
 import '../services/json_storage_service.dart';
 import '../models/employee.dart';
-import '../widgets/camera_preview_widget.dart';
 import '../widgets/bottom_nav.dart';
 
 class EnrollmentScreen extends StatefulWidget {
@@ -16,31 +17,55 @@ class EnrollmentScreen extends StatefulWidget {
   State<EnrollmentScreen> createState() => _EnrollmentScreenState();
 }
 
-class _EnrollmentScreenState extends State<EnrollmentScreen> {
+class _EnrollmentScreenState extends State<EnrollmentScreen>
+    with WidgetsBindingObserver {
   CameraController? _controller;
 
   bool _loading = true;
   bool _countingDown = false;
   bool _processing = false;
+  bool _isInitializing = false;
 
   int _countdown = 0;
-  String _statusText = "Select employee and tap Enroll";
+  String _statusText = "Position your face in the frame";
 
-  List<Employee> _availableEmployees = [];
-  Employee? _selectedEmployee;
+  List<Attendance> _availableEmployees = [];
+  Attendance? _selectedEmployee;
   String _searchQuery = "";
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadEmployees();
     _initCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_controller != null && _controller!.value.isInitialized) {
+      if (state == AppLifecycleState.inactive) {
+        _controller!.dispose();
+      } else if (state == AppLifecycleState.resumed) {
+        if (!_isInitializing) {
+          _initCamera();
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _controller?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadEmployees() async {
     try {
       // Load from JSON file
-      final employees = await JsonStorageService.loadEmployees();
+      // final employees = await JsonStorageService.loadEmployees();
+      final employees = await ApiService.fetchAttendance();
       print("📋 Loaded ${employees.length} employees from JSON");
 
       // Fetch enrolled employees from backend
@@ -50,7 +75,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
       setState(() {
         // Filter out already enrolled employees
         _availableEmployees =
-            employees.where((emp) => !enrolledIds.contains(emp.code)).toList();
+            employees;
 
         print(
             "📝 ${_availableEmployees.length} employees available for enrollment");
@@ -63,9 +88,9 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
       print("❌ Error loading employees: $e");
       // If there's an error, still show employees (they just won't be filtered)
       try {
-        final employees = await JsonStorageService.loadEmployees();
+        // final attendance = await JsonStorageService.loadEmployees();
         setState(() {
-          _availableEmployees = employees;
+          _availableEmployees = [];
           if (_availableEmployees.isNotEmpty && _selectedEmployee == null) {
             _selectedEmployee = _availableEmployees.first;
           }
@@ -89,32 +114,90 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
   }
 
   Future<void> _initCamera() async {
-    final cameras = await availableCameras();
-    final front = cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.front,
-    );
+    if (_isInitializing) return;
 
-    _controller = CameraController(
-      front,
-      ResolutionPreset.medium,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
+    _isInitializing = true;
 
-    await _controller!.initialize();
+    try {
+      // Dispose existing controller if any
+      if (_controller != null) {
+        try {
+          await _controller!.dispose();
+        } catch (e) {
+          print("⚠️ Error disposing old controller: $e");
+        }
+        _controller = null;
+      }
 
-    if (mounted) {
-      setState(() => _loading = false);
+      // Small delay to ensure previous camera is fully released
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      if (!mounted) {
+        _isInitializing = false;
+        return;
+      }
+
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        print("❌ No cameras available");
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _isInitializing = false;
+          });
+        }
+        return;
+      }
+
+      final front = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _controller = CameraController(
+        front,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      await _controller!.initialize();
+
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isInitializing = false;
+        });
+        print("✅ Camera initialized successfully in enrollment screen");
+        print("📹 Camera preview size: ${_controller!.value.previewSize}");
+        print("📹 Camera aspect ratio: ${_controller!.value.aspectRatio}");
+        print("📹 Camera is initialized: ${_controller!.value.isInitialized}");
+      }
+    } catch (e) {
+      print("❌ Error initializing camera in enrollment screen: $e");
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isInitializing = false;
+        });
+      }
+      // Retry after a delay if initialization failed
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted &&
+            (_controller == null || !_controller!.value.isInitialized)) {
+          _initCamera();
+        }
+      });
     }
   }
 
-  List<Employee> get _filteredEmployees {
+  List<Attendance> get _filteredEmployees {
     if (_searchQuery.isEmpty) {
       return _availableEmployees;
     }
     return _availableEmployees.where((emp) {
       final query = _searchQuery.toLowerCase();
-      return emp.fullName.toLowerCase().contains(query) ||
+      return emp.name.toLowerCase().contains(query) ||
           emp.code.toLowerCase().contains(query);
     }).toList();
   }
@@ -160,21 +243,127 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
       final faceBase64 = base64Encode(bytes);
 
       if (!mounted) return;
-      setState(() => _statusText = "Image captured ✓");
 
-      await Future.delayed(const Duration(milliseconds: 400));
+      // Show preview dialog
+      setState(() {
+        _processing = false;
+      });
 
-      setState(() => _statusText = "Processing face…");
+      _showImagePreviewDialog(faceBase64);
+    } catch (e) {
+      if (!mounted) return;
+      final errorMsg = "Error capturing image: ${e.toString()}";
 
-      final success = await ApiService.enrollEmployee(
-        employeeId: _selectedEmployee!.code,
-        name: _selectedEmployee!.fullName,
-        faceBase64: faceBase64,
+      setState(() {
+        _processing = false;
+        _statusText = "❌ $errorMsg";
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMsg),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
+    }
+  }
+
+  void _showImagePreviewDialog(String imageBase64) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1A1A),
+        title: Text(
+          "Preview Image",
+          style: GoogleFonts.inter(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(
+                base64Decode(imageBase64),
+                width: 200,
+                height: 200,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Review your image. Does it look good?",
+              style: GoogleFonts.inter(
+                color: Colors.grey,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text(
+              "Retake",
+              style: GoogleFonts.inter(
+                color: Colors.red,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _confirmAndEnroll(imageBase64);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF57C200),
+              foregroundColor: Colors.white,
+            ),
+            child: Text(
+              "Confirm & Enroll",
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmAndEnroll(String faceBase64) async {
+    if (_selectedEmployee == null) return;
+
+    setState(() {
+      _processing = true;
+      _statusText = "Enrolling face…";
+    });
+
+    try {
+      print(
+          "🔄 Starting enrollment for: ${_selectedEmployee!.code} (${_selectedEmployee!.name})");
+      print("📸 Image size: ${faceBase64.length} characters");
+
+      final result = await ApiService.enrollEmployee(
+        employeeId: _selectedEmployee!.code,
+        name: _selectedEmployee!.name,
+        faceBase64: faceBase64,
+        uuid: _selectedEmployee!.uuid,
+      );
+
+      print("📥 Enrollment response: $result");
 
       if (!mounted) return;
 
-      if (success) {
+      if (result["success"] == true) {
         // Remove from available list
         setState(() {
           _availableEmployees.remove(_selectedEmployee);
@@ -195,26 +384,28 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
           ),
         );
       } else {
+        final errorMessage = result["message"] ?? "Enrollment failed";
         setState(() {
           _processing = false;
-          _statusText = "❌ Failed to recognize";
+          _statusText = "❌ $errorMessage";
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("❌ Failed to recognize - Please use live camera"),
+          SnackBar(
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 4),
+            duration: const Duration(seconds: 5),
           ),
         );
       }
     } catch (e) {
+      print("from enrollment catch");
       if (!mounted) return;
       final errorMsg = e.toString().contains("timeout") ||
               e.toString().contains("Failed host lookup") ||
               e.toString().contains("Connection refused")
           ? "Cannot connect to backend server. Is it running?"
-          : "Error: ${e.toString()}";
+          : e.toString().replaceAll("Exception: ", "");
 
       setState(() {
         _processing = false;
@@ -232,149 +423,417 @@ class _EnrollmentScreenState extends State<EnrollmentScreen> {
   }
 
   @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    // Reinitialize camera if not initialized and not currently initializing
+    if (!_loading &&
+        (_controller == null || !_controller!.value.isInitialized) &&
+        !_isInitializing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isInitializing && _controller == null) {
+          _initCamera();
+        }
+      });
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Employee Enrollment"),
-        centerTitle: true,
-      ),
+      backgroundColor: const Color(0xFF0B0B0B),
       bottomNavigationBar: const BottomNav(index: 2),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
+          : SafeArea(
+              child: _mainContent(),
+            ),
+    );
+  }
+
+  // ================= MAIN CONTENT =================
+  Widget _mainContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _employeeCard(),
+          const SizedBox(height: 24),
+          _titleSection(),
+          const SizedBox(height: 20),
+          _cameraScanner(),
+          const SizedBox(height: 24),
+          if (_statusText.isNotEmpty && !_countingDown && !_processing)
+            _statusMessage(),
+          if (_statusText.isNotEmpty && !_countingDown && !_processing)
+            const SizedBox(height: 16),
+          _tipsCard(),
+          const SizedBox(height: 24),
+          _enrollButton(),
+        ],
+      ),
+    );
+  }
+
+  // ================= EMPLOYEE CARD =================
+  Widget _employeeCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF2D2A2A)),
+      ),
+      child: _availableEmployees.isEmpty
+          ? Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  "All employees are enrolled!",
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: Colors.green[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            )
+          : Row(
               children: [
                 Expanded(
-                  child: Stack(
-                    children: [
-                      CameraPreviewWidget(controller: _controller!),
-                      if (_countingDown) _overlayText("$_countdown"),
-                      if (_processing) _overlayText(_statusText),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _employeeSelector(),
-                      const SizedBox(height: 14),
-                      Text(
-                        _statusText,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 14),
-                      ElevatedButton(
-                        onPressed: (_countingDown ||
-                                _processing ||
-                                _selectedEmployee == null)
-                            ? null
-                            : _startEnrollment,
-                        child: const Text("Enroll Employee"),
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<Attendance>(
+                          value: _selectedEmployee,
+                          hint: Text(
+                            "Select Employee/Intern",
+                            style: GoogleFonts.inter(
+                              color: Colors.white70,
+                              fontSize: 16,
+                            ),
+                          ),
+                          dropdownColor: const Color(0xFF1C1A1A),
+                          icon: const Icon(Icons.expand_more,
+                              color: Color(0xFF57C200)),
+                          style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold),
+                          items: _filteredEmployees.map((employee) {
+                            return DropdownMenuItem<Attendance>(
+                              value: employee,
+                              child: Text(employee.name),
+                            );
+                          }).toList(),
+                          onChanged: (Attendance? newValue) {
+                            setState(() {
+                              _selectedEmployee = newValue;
+                            });
+                          },
+                        ),
                       ),
                     ],
                   ),
                 ),
+                if (_selectedEmployee != null) ...[
+                  const SizedBox(width: 16),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedEmployee!.code,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        _selectedEmployee!.type,
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
     );
   }
 
-  Widget _employeeSelector() {
+  // ================= TITLE =================
+  Widget _titleSection() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          "Select Employee",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        Text(
+          "Position Your Face",
+          style: GoogleFonts.inter(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 8),
-        // Search field
-        TextField(
-          decoration: const InputDecoration(
-            hintText: "Search by name or ID...",
-            prefixIcon: Icon(Icons.search),
-            border: OutlineInputBorder(),
-          ),
-          onChanged: (value) {
-            setState(() {
-              _searchQuery = value;
-            });
-          },
-        ),
-        const SizedBox(height: 8),
-        // Dropdown
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<Employee>(
-              isExpanded: true,
-              value: _selectedEmployee,
-              hint: const Text("Select employee..."),
-              items: _filteredEmployees.map((employee) {
-                return DropdownMenuItem<Employee>(
-                  value: employee,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        employee.fullName,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        "${employee.code} - ${employee.type}",
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-              onChanged: (Employee? newValue) {
-                setState(() {
-                  _selectedEmployee = newValue;
-                });
-              },
-            ),
+        Text(
+          "Center your face within the frame. Ensure good lighting and remove accessories.",
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            color: Colors.grey,
           ),
         ),
-        if (_availableEmployees.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              "All employees are enrolled!",
-              style: TextStyle(color: Colors.green[700]),
-            ),
-          ),
       ],
     );
   }
 
-  Widget _overlayText(String text) {
+  // ================= CAMERA SCANNER =================
+  Widget _cameraScanner() {
+    return Center(
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 260,
+            height: 260,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFE0D8C8),
+            ),
+          ),
+          Container(
+            width: 240,
+            height: 240,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFE0D8C8), width: 4),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: _controller != null && _controller!.value.isInitialized
+                ? ClipOval(
+                    child: AspectRatio(
+                      aspectRatio: _controller!.value.aspectRatio,
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: _controller!.value.previewSize?.height ?? 240,
+                          height: _controller!.value.previewSize?.width ?? 240,
+                          child: CameraPreview(_controller!),
+                        ),
+                      ),
+                    ),
+                  )
+                : Container(
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black26,
+                    ),
+                    child: const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    ),
+                  ),
+          ),
+          if (_countingDown)
+            Container(
+              width: 240,
+              height: 240,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black54,
+              ),
+              child: Center(
+                child: Text(
+                  "$_countdown",
+                  style: const TextStyle(
+                    fontSize: 72,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          if (_processing)
+            Container(
+              width: 240,
+              height: 240,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black54,
+              ),
+              child: Center(
+                child: Text(
+                  _statusText,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ================= TIPS =================
+  Widget _tipsCard() {
     return Container(
-      color: Colors.black54,
-      alignment: Alignment.center,
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontSize: 42,
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1A1A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF333333)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.info, color: Color(0xFF57C200)),
+              SizedBox(width: 8),
+              Text("Tips for success", style: TextStyle(color: Colors.white)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _tip("Hold your phone at eye level"),
+          _tip("Avoid direct sunlight"),
+          _tip("Keep a neutral expression"),
+        ],
+      ),
+    );
+  }
+
+  Widget _tip(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: Colors.grey,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= STATUS MESSAGE =================
+  Widget _statusMessage() {
+    final isSuccess =
+        _statusText.contains("successful") || _statusText.contains("✔");
+    final isError = _statusText.contains("Failed") ||
+        _statusText.contains("❌") ||
+        _statusText.contains("Error");
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isSuccess
+            ? Colors.green.shade900.withOpacity(0.3)
+            : isError
+                ? Colors.red.shade900.withOpacity(0.3)
+                : const Color(0xFF1C1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isSuccess
+              ? Colors.green.shade700
+              : isError
+                  ? Colors.red.shade700
+                  : const Color(0xFF333333),
+          width: 1,
         ),
       ),
+      child: Row(
+        children: [
+          Icon(
+            isSuccess
+                ? Icons.check_circle
+                : isError
+                    ? Icons.error
+                    : Icons.info,
+            color: isSuccess
+                ? Colors.green.shade400
+                : isError
+                    ? Colors.red.shade400
+                    : Colors.grey,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _statusText,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: isSuccess
+                    ? Colors.green.shade300
+                    : isError
+                        ? Colors.red.shade300
+                        : Colors.grey.shade300,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= BUTTON =================
+  Widget _enrollButton() {
+    final isEnabled = !_countingDown &&
+        !_processing &&
+        _selectedEmployee != null &&
+        _availableEmployees.isNotEmpty;
+
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor:
+            isEnabled ? const Color(0xFF57C200) : Colors.grey.shade700,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        elevation: isEnabled ? 2 : 0,
+      ),
+      icon: _processing
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.camera_alt, color: Colors.white),
+      label: Text(
+        _processing
+            ? "Processing..."
+            : _countingDown
+                ? "Get ready..."
+                : "Enroll Face",
+        style: GoogleFonts.inter(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+      onPressed: isEnabled ? _startEnrollment : null,
     );
   }
 }

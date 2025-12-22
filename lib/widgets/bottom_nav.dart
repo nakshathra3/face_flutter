@@ -31,7 +31,7 @@ class BottomNav extends StatelessWidget {
       items: const [
         BottomNavigationBarItem(icon: Icon(Icons.grid_view), label: "Home"),
         BottomNavigationBarItem(icon: Icon(Icons.schedule), label: "Clock"),
-        BottomNavigationBarItem(icon: Icon(Icons.group), label: "Employees"),
+        BottomNavigationBarItem(icon: Icon(Icons.group), label: "Enroll"),
       ],
     );
   }

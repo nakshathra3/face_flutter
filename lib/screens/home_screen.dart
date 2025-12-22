@@ -73,8 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildHeader() {
     final now = DateTime.now();
-    final date =
-        "${_weekday(now.weekday)}, ${now.day} ${_month(now.month)}";
+    final date = "${_weekday(now.weekday)}, ${now.day} ${_month(now.month)}";
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -117,17 +116,15 @@ class _HomeScreenState extends State<HomeScreen> {
               Icon(Icons.circle, size: 8, color: primary),
               SizedBox(width: 6),
               Text("Ready to Clock In",
-                  style: TextStyle(
-                      color: primary, fontWeight: FontWeight.w600)),
+                  style:
+                      TextStyle(color: primary, fontWeight: FontWeight.w600)),
             ]),
           ),
           const SizedBox(height: 12),
           Text(
             "${now.format(context)}",
             style: const TextStyle(
-                fontSize: 40,
-                fontWeight: FontWeight.bold,
-                color: Colors.white),
+                fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 4),
           const Text("Office Time Zone",
@@ -184,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildActivityItem(dynamic r) {
-    final isOut = r["clock_out"] != null;
+    final isOut = r.clock_out != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -204,14 +201,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(width: 12),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(r["name"],
+              Text(r.name,
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600)),
+                      color: Colors.white, fontWeight: FontWeight.w600)),
               Text(
                 isOut
-                    ? "Checked out • ${r["clock_out"]}"
-                    : "Checked in • ${r["clock_in"]}",
+                    ? "Checked out • ${r.clock_out}"
+                    : "Checked in • ${r.clock_in}",
                 style: const TextStyle(color: textMuted, fontSize: 12),
               ),
             ]),
@@ -245,8 +241,7 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white10),
         boxShadow: const [
-          BoxShadow(
-              color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))
+          BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))
         ],
       ),
       child: child,
@@ -255,6 +250,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _weekday(int d) =>
       ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d - 1];
-  String _month(int m) =>
-      ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
+  String _month(int m) => [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec"
+      ][m - 1];
 }

@@ -39,3 +39,7 @@ working_emu/
 # IDE files
 .idea/
 *.iml
+
+backend/.venv*
+
+*.zip
