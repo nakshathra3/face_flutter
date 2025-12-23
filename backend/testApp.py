@@ -623,15 +623,71 @@ def recognize():
         # Get user_id from uuid field (API returns 'uuid', not 'user_id')
         user_id = best_match.get("uuid") or best_match.get("user_id")
         employee_name = best_match.get("full_name") or best_match.get("name")
+        
+         # Determine user type (employee or intern) from best_match
+        user_type = best_match.get("type") or ("intern" if (best_match.get("code") or "").startswith("INT") else "employee")
+        print(f"👤 [RECOGNITION LOG] User type: {user_type}")
+        sys.stdout.flush()
 
-        last = next(
-            (r for r in reversed(attendance)
-             if r["employee_id"] == user_id and r["date"] == today),
-            None
-        )
+        # Fetch today's attendance from API to check if user clocked in
+        last = None
+        try:
+            print(f"\n🔍 [ATTENDANCE CHECK] Fetching today's attendance from API for user_id: {user_id}, date: {today}")
+            sys.stdout.flush()
+            # Adjust the endpoint based on your API structure
+            # Option 1: If API has endpoint like /attendance?user_id=...&date=...
+            response = requests.get(
+                url + "/attendance",
+                params={"user_id": user_id, "date": today, "user_type": user_type}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Parse the API response structure: data.data.employees and data.data.interns
+                attendance_records = []
+                if isinstance(data, dict) and "data" in data:
+                    data_obj = data.get("data", {})
+                    employees = data_obj.get("employees", [])
+                    interns = data_obj.get("interns", [])
+                    # Combine employees and interns lists
+                    attendance_records = employees + interns
+                    print(f"📊 [ATTENDANCE CHECK] Found {len(employees)} employees and {len(interns)} interns")
+                elif isinstance(data, list):
+                    attendance_records = data
+                else:
+                    attendance_records = []
+                
+                # Find the most recent record for today that has clock_in but no clock_out
+                for record in reversed(attendance_records):
+                    if not isinstance(record, dict):
+                        print(f"⚠️ [ATTENDANCE CHECK] Skipping non-dict record: {type(record)} - {record}")
+                        continue
+                    record_user_id = record.get("uuid")
+                    record_date = record.get("date")
+                    if record_user_id == user_id and record_date == today:
+                        clock_in_time = record.get("clock_in_time")
+                        clock_out_time = record.get("clock_out_time")
+                        if clock_in_time and not clock_out_time:
+                            last = record
+                            print(f"✅ [ATTENDANCE CHECK] Found clock-in record: clock_in_time={clock_in_time}")
+                            sys.stdout.flush()
+                            break
+                else:
+                    print(f"ℹ️ [ATTENDANCE CHECK] No active clock-in found for today")
+                    sys.stdout.flush()
+            else:
+                print(f"⚠️ [ATTENDANCE CHECK] API returned status {response.status_code}: {response.text[:200]}")
+                sys.stdout.flush()
+        except Exception as e:
+            print(f"❌ [ATTENDANCE CHECK] Error fetching attendance from API: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.stdout.flush()
+            # Continue anyway, will handle as no clock-in found
 
         if action == "in":
-            if last and last["clock_out"] is None:
+            if last and  last.get("clock_in") and not last.get("clock_out"):
                 return jsonify({
                     "matched": True,
                     "message": "Already clocked in",
@@ -641,16 +697,44 @@ def recognize():
                 })
 
             record = {
-                "employee_id": user_id,
-                "name": employee_name,
+                "user_id": user_id,
+                "full_name": employee_name,
                 "date": today,
                 "clock_in": now,
-                "clock_out": None
+                "clock_out": None,
+                "hours_worked": None,
+                "user_type": user_type
             }
-            attendance.append(record)
+            
+            # Send clock-in to API
+            try:
+                print(f"\n💾 [ATTENDANCE LOG] Sending clock-in to API...")
+                print(f"📦 [ATTENDANCE LOG] Attendance data: {record}")
+                sys.stdout.flush()
+                
+                response = requests.post(url + "/attendance", json=clock_out_data)
+                print(f"🌐 [ATTENDANCE LOG] API Response status: {response.status_code}")
+                print(f"🌐 [ATTENDANCE LOG] API Response text: {response.text[:200]}")
+                sys.stdout.flush()
+                
+                if response.status_code not in [200, 201]:
+                    print(f"⚠️ [ATTENDANCE LOG] WARNING: API returned status {response.status_code}")
+                    return jsonify({
+                        "matched": False,
+                        "message": f"Failed to save clock-in: {response.status_code}"
+                    }), 500
+            except Exception as e:
+                print(f"❌ [ATTENDANCE LOG] Error sending clock-in to API: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.stdout.flush()
+                return jsonify({
+                    "matched": False,
+                    "message": f"Failed to save clock-in: {str(e)}"
+                }), 500
 
         elif action == "out":
-            if not last or last["clock_out"] is not None:
+            if not last or not last.get("clock_in_time"):
                 return jsonify({
                     "matched": True,
                     "message": "Clock in first",
@@ -658,22 +742,85 @@ def recognize():
                     "emotion": emotion,
                     "image":img_data
                 })
+            
+            # Already clocked out check
+            if last.get("clock_out"):
+                return jsonify({
+                    "matched": True,
+                    "message": "Already clocked out",
+                    "employee": best_match,
+                    "emotion": emotion,
+                    "image": img_data
+                })
 
             # Calculate hours worked
-            if last and last["clock_in"]:
-                clock_in_time = datetime.strptime(f"{today} {last['clock_in']}", "%Y-%m-%d %H:%M:%S")
+            clock_in_time_str = last.get("clock_in_time")
+            if clock_in_time_str:
+                # API returns full datetime string "2025-12-23 15:13:59", extract just time part
+                if " " in clock_in_time_str:
+                    clock_in_time_only = clock_in_time_str.split(" ")[1]  # Extract "15:13:59"
+                else:
+                    clock_in_time_only = clock_in_time_str
+                
+                clock_in_time = datetime.strptime(f"{today} {clock_in_time_only}", "%Y-%m-%d %H:%M:%S")
                 clock_out_time = datetime.strptime(f"{today} {now}", "%Y-%m-%d %H:%M:%S")
                 hours_worked = (clock_out_time - clock_in_time).total_seconds() / 3600
-                last["hours_worked"] = round(hours_worked, 2)
+            else:
+                hours_worked = None
 
-            last["clock_out"] = now
-            record = last
+            # Prepare clock-out data for API update
+            clock_out_data = {
+                "user_id": user_id,
+                "date": today,
+                "clock_out": now,
+                "hours_worked": round(hours_worked, 2) if hours_worked else None,
+                "user_type": user_type
+            }
+
+            
+            # Send clock-out to API (update existing record)
+            try:
+                print(f"\n💾 [ATTENDANCE LOG] Sending clock-out to API...")
+                print(f"📦 [ATTENDANCE LOG] Clock-out data: {clock_out_data}")
+                sys.stdout.flush()
+                
+                # Use POST /attendance for clock-out (same endpoint as clock-in)
+                response = requests.post(url + "/attendance", json=clock_out_data)
+                
+                print(f"🌐 [ATTENDANCE LOG] API Response status: {response.status_code}")
+                print(f"🌐 [ATTENDANCE LOG] API Response text: {response.text[:200]}")
+                sys.stdout.flush()
+                
+                if response.status_code not in [200, 201]:
+                    print(f"⚠️ [ATTENDANCE LOG] WARNING: API returned status {response.status_code}")
+                    return jsonify({
+                        "matched": False,
+                        "message": f"Failed to save clock-out: {response.status_code}"
+                    }), 500
+
+        # Prepare record for response
+                record = {
+                    "user_id": user_id,
+                    "full_name": employee_name,
+                    "date": today,
+                    "clock_in": clock_in_time_str,
+                    "clock_out": now,
+                    "hours_worked": round(hours_worked, 2) if hours_worked else None
+                }
+            except Exception as e:
+                print(f"❌ [ATTENDANCE LOG] Error sending clock-out to API: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.stdout.flush()
+                return jsonify({
+                    "matched": False,
+                    "message": f"Failed to save clock-out: {str(e)}"
+                }), 500
 
         else:
             print('matched: false')
             return jsonify({"matched": False, "message": "Invalid action"}), 400
 
-        # save_json(ATTENDANCE_FILE, {"records": attendance})
         print(f"✅ {action.upper()}: {employee_name} ({user_id}) at {now}")
         sys.stdout.flush()
 
