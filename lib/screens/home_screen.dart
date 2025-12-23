@@ -83,8 +83,8 @@ class _HomeScreenState extends State<HomeScreen> {
               style: const TextStyle(
                   color: textMuted, fontSize: 13, fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
-          const Text("Good Morning",
-              style: TextStyle(
+          Text(_getGreeting(),
+              style: const TextStyle(
                   color: Colors.white,
                   fontSize: 24,
                   fontWeight: FontWeight.bold)),
@@ -96,6 +96,17 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ],
     );
+  }
+
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) {
+      return "Good Morning";
+    } else if (hour < 16) {
+      return "Good Afternoon";
+    } else {
+      return "Good Evening";
+    }
   }
 
   // ───────────────── CLOCK CARD ─────────────────
@@ -181,7 +192,57 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildActivityItem(dynamic r) {
-    final isOut = r.clock_out != null;
+    final hasClockIn = r.clock_in != null && r.clock_in.isNotEmpty;
+    final hasClockOut = r.clock_out != null && r.clock_out.isNotEmpty;
+
+    // Determine status: Present (<= 10:00), Late (> 10:00), or Absent
+    String status;
+    Color statusColor;
+
+    if (!hasClockIn) {
+      status = "Absent";
+      statusColor = Colors.grey;
+    } else {
+      // Parse clock_in time (format: "HH:MM:SS" or "HH:MM")
+      final clockInTime =
+          r.clock_in.split(":").take(2).join(":"); // Extract HH:MM
+      final timeParts = clockInTime.split(":");
+      if (timeParts.length == 2) {
+        final hour = int.tryParse(timeParts[0]) ?? 0;
+        final minute = int.tryParse(timeParts[1]) ?? 0;
+        // If check-in time is after 10:00 AM, it's Late
+        if (hour > 10 || (hour == 10 && minute > 0)) {
+          status = "Late";
+          statusColor = Colors.orange;
+        } else {
+          status = "Present";
+          statusColor = primary;
+        }
+      } else {
+        status = "Present";
+        statusColor = primary;
+      }
+    }
+
+    // Format time display
+    String timeDisplay;
+    if (!hasClockIn) {
+      timeDisplay = "-";
+    } else {
+      final clockInTime = r.clock_in
+          .split(":")
+          .take(2)
+          .join(":"); // Extract HH:MM from "HH:MM:SS"
+      if (hasClockOut) {
+        final clockOutTime = r.clock_out
+            .split(":")
+            .take(2)
+            .join(":"); // Extract HH:MM from "HH:MM:SS"
+        timeDisplay = "$clockInTime - $clockOutTime";
+      } else {
+        timeDisplay = clockInTime;
+      }
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -194,34 +255,42 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(children: [
-            const CircleAvatar(
-              backgroundColor: Colors.grey,
-              child: Icon(Icons.person, color: Colors.white),
-            ),
-            const SizedBox(width: 12),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(r.name,
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600)),
-              Text(
-                isOut
-                    ? "Checked out • ${r.clock_out}"
-                    : "Checked in • ${r.clock_in}",
-                style: const TextStyle(color: textMuted, fontSize: 12),
+          Expanded(
+            child: Row(children: [
+              const CircleAvatar(
+                backgroundColor: Colors.grey,
+                child: Icon(Icons.person, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        r.name ?? r.full_name ?? 'Unknown',
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        timeDisplay,
+                        style: const TextStyle(color: textMuted, fontSize: 12),
+                      ),
+                    ]),
               ),
             ]),
-          ]),
+          ),
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: (isOut ? Colors.blue : primary).withOpacity(0.15),
+              color: statusColor.withOpacity(0.15),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
-              isOut ? "Completed" : "On Time",
+              status,
               style: TextStyle(
-                  color: isOut ? Colors.blue : primary,
+                  color: statusColor,
                   fontSize: 12,
                   fontWeight: FontWeight.w600),
             ),

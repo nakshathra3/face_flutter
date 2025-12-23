@@ -27,11 +27,12 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
   bool _isInitializing = false;
 
   int _countdown = 0;
-  String _statusText = "Position your face in the frame";
+  String _statusText = "";
 
   List<Attendance> _availableEmployees = [];
   Attendance? _selectedEmployee;
   String _searchQuery = "";
+  String? _confirmedImageBase64; // Store confirmed image
 
   @override
   void initState() {
@@ -74,8 +75,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
       setState(() {
         // Filter out already enrolled employees
-        _availableEmployees =
-            employees;
+        _availableEmployees = employees;
 
         print(
             "📝 ${_availableEmployees.length} employees available for enrollment");
@@ -205,13 +205,13 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
   void _startEnrollment() {
     if (_countingDown || _processing) return;
 
-    if (_selectedEmployee == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please select an employee")),
-      );
+    // If image is already confirmed, proceed with enrollment
+    if (_confirmedImageBase64 != null) {
+      _confirmAndEnroll(_confirmedImageBase64!);
       return;
     }
 
+    // Otherwise, start capture process
     setState(() {
       _countdown = 3;
       _countingDown = true;
@@ -234,7 +234,6 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
     setState(() {
       _countingDown = false;
       _processing = true;
-      _statusText = "Capturing image…";
     });
 
     try {
@@ -309,6 +308,10 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
+              setState(() {
+                _confirmedImageBase64 =
+                    null; // Clear confirmed image if retaking
+              });
             },
             child: Text(
               "Retake",
@@ -321,14 +324,19 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
           ElevatedButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _confirmAndEnroll(imageBase64);
+              // Store the confirmed image
+              setState(() {
+                _confirmedImageBase64 = imageBase64;
+                _selectedEmployee =
+                    null; // Reset selection when new image is confirmed
+              });
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF57C200),
               foregroundColor: Colors.white,
             ),
             child: Text(
-              "Confirm & Enroll",
+              "Confirm",
               style: GoogleFonts.inter(
                 fontWeight: FontWeight.w600,
               ),
@@ -340,7 +348,12 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
   }
 
   Future<void> _confirmAndEnroll(String faceBase64) async {
-    if (_selectedEmployee == null) return;
+    if (_selectedEmployee == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select an employee")),
+      );
+      return;
+    }
 
     setState(() {
       _processing = true;
@@ -369,12 +382,14 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
         setState(() {
           _availableEmployees.remove(_selectedEmployee);
           if (_availableEmployees.isNotEmpty) {
-            _selectedEmployee = _availableEmployees.first;
+            _selectedEmployee = null; // Don't auto-select, let user choose
           } else {
             _selectedEmployee = null;
           }
           _searchQuery = "";
           _processing = false;
+          _confirmedImageBase64 =
+              null; // Clear confirmed image after successful enrollment
           _statusText = "✔ Enrollment successful";
         });
 
@@ -454,18 +469,17 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _employeeCard(),
-          const SizedBox(height: 24),
           _titleSection(),
           const SizedBox(height: 20),
           _cameraScanner(),
           const SizedBox(height: 24),
-          if (_statusText.isNotEmpty && !_countingDown && !_processing)
-            _statusMessage(),
-          if (_statusText.isNotEmpty && !_countingDown && !_processing)
-            const SizedBox(height: 16),
           _tipsCard(),
           const SizedBox(height: 24),
+          // Show employee dropdown only after image is confirmed
+          if (_confirmedImageBase64 != null) ...[
+            _employeeCard(),
+            const SizedBox(height: 24),
+          ],
           _enrollButton(),
         ],
       ),
@@ -576,15 +590,15 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
             color: Colors.white,
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          "Center your face within the frame. Ensure good lighting and remove accessories.",
-          textAlign: TextAlign.center,
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            color: Colors.grey,
-          ),
-        ),
+        // const SizedBox(height: 8),
+        // Text(
+        //   "Center your face within the frame. Ensure good lighting and remove accessories.",
+        //   textAlign: TextAlign.center,
+        //   style: GoogleFonts.inter(
+        //     fontSize: 13,
+        //     color: Colors.grey,
+        //   ),
+        // ),
       ],
     );
   }
@@ -702,6 +716,8 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
           _tip("Hold your phone at eye level"),
           _tip("Avoid direct sunlight"),
           _tip("Keep a neutral expression"),
+          _tip("Ensure good lighting"),
+          _tip("Remove accessories"),
         ],
       ),
     );
@@ -796,10 +812,22 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
   // ================= BUTTON =================
   Widget _enrollButton() {
+    final hasConfirmedImage = _confirmedImageBase64 != null;
     final isEnabled = !_countingDown &&
         !_processing &&
-        _selectedEmployee != null &&
-        _availableEmployees.isNotEmpty;
+        (!hasConfirmedImage ||
+            (_selectedEmployee != null && _availableEmployees.isNotEmpty));
+
+    String buttonText;
+    if (_processing) {
+      buttonText = "Processing...";
+    } else if (_countingDown) {
+      buttonText = "Get ready...";
+    } else if (hasConfirmedImage) {
+      buttonText = "Enroll Face";
+    } else {
+      buttonText = "Capture Image";
+    }
 
     return ElevatedButton.icon(
       style: ElevatedButton.styleFrom(
@@ -821,13 +849,12 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
                 color: Colors.white,
               ),
             )
-          : const Icon(Icons.camera_alt, color: Colors.white),
+          : Icon(
+              hasConfirmedImage ? Icons.person_add : Icons.camera_alt,
+              color: Colors.white,
+            ),
       label: Text(
-        _processing
-            ? "Processing..."
-            : _countingDown
-                ? "Get ready..."
-                : "Enroll Face",
+        buttonText,
         style: GoogleFonts.inter(
           fontSize: 18,
           fontWeight: FontWeight.bold,
