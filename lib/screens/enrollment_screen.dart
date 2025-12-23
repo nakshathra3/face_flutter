@@ -357,6 +357,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
         name: _selectedEmployee!.name,
         faceBase64: faceBase64,
         uuid: _selectedEmployee!.uuid,
+        user_type: _selectedEmployee!.user_type,
       );
 
       print("📥 Enrollment response: $result");

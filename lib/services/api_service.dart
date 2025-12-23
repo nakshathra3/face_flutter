@@ -15,7 +15,8 @@ class ApiService {
   // Updated IP addresses found: 192.168.56.1 (VirtualBox) or 192.168.29.91 (Main network)
   // For Android Emulator, change to: "http://10.0.2.2:5000"
   // static const String _baseUrl = "http://192.168.29.91:5000";
-  static const String _baseUrl = "https://dmemployee.upskilllabs.in";
+  // static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
+  static const String _baseUrl = "http://192.168.29.91:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
@@ -58,10 +59,7 @@ class ApiService {
         errorMessage = "Error: ${e.toString()}";
       }
 
-      return {
-        "matched": false,
-        "message": errorMessage,
-      };
+      return {"matched": false, "message": errorMessage};
     }
   }
 
@@ -98,11 +96,8 @@ class ApiService {
 
   static Future<Set<String>> getEnrolledEmployeeIds() async {
     try {
-      final response = await http
-          .get(
-        Uri.parse("$_baseUrl/enrolled-ids"),
-      )
-          .timeout(
+      final response =
+          await http.get(Uri.parse("$_baseUrl/enrolled-ids")).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
           throw Exception("Request timeout");
@@ -127,6 +122,7 @@ class ApiService {
     required String name,
     required String faceBase64,
     required String uuid,
+    required String user_type,
   }) async {
     try {
       final response = await http
@@ -138,6 +134,7 @@ class ApiService {
           "name": name,
           "face": faceBase64,
           "uuid": uuid,
+          "user_type": user_type,
         }),
       )
           .timeout(
@@ -163,10 +160,7 @@ class ApiService {
           final errorMessage = errorData["message"] ?? "Enrollment failed";
           print("Enrollment failed with status: ${response.statusCode}");
           print("Response: ${response.body}");
-          return {
-            "success": false,
-            "message": errorMessage,
-          };
+          return {"success": false, "message": errorMessage};
         } catch (e) {
           return {
             "success": false,
@@ -185,10 +179,7 @@ class ApiService {
       } else {
         errorMessage = e.toString().replaceAll("Exception: ", "");
       }
-      return {
-        "success": false,
-        "message": errorMessage,
-      };
+      return {"success": false, "message": errorMessage};
     }
   }
 }

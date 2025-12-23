@@ -6,6 +6,7 @@ class Attendance {
   final String emotion;
   final String type;
   final String uuid;
+  final String user_type;
   Attendance({
     required this.code,
     required this.name,
@@ -14,6 +15,7 @@ class Attendance {
     required this.emotion,
     required this.type,
     required this.uuid,
+    required this.user_type,
   });
 
   factory Attendance.fromJson(Map<String, dynamic> json) {
@@ -25,6 +27,7 @@ class Attendance {
       emotion: json['emotion'] ?? '',
       type: json['type'] ?? '',
       uuid: json['uuid'] ?? '',
+      user_type: json['user_type'] ?? '',
     );
   }
 }
