@@ -712,7 +712,7 @@ def recognize():
                 print(f"📦 [ATTENDANCE LOG] Attendance data: {record}")
                 sys.stdout.flush()
                 
-                response = requests.post(url + "/attendance", json=clock_out_data)
+                response = requests.post(url + "/attendance", json=record)
                 print(f"🌐 [ATTENDANCE LOG] API Response status: {response.status_code}")
                 print(f"🌐 [ATTENDANCE LOG] API Response text: {response.text[:200]}")
                 sys.stdout.flush()
