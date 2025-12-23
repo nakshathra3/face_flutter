@@ -213,30 +213,6 @@ class _ClockScreenState extends State<ClockScreen> {
             : Column(
                 children: [
                   /// HEADER
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    height: 60,
-                    color: const Color(0xFF1C1A1A),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon:
-                              const Icon(Icons.arrow_back, color: Colors.white),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          "Back",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
                   Expanded(
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
