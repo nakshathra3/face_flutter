@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:intl/intl.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../services/api_service.dart';
 import '../widgets/bottom_nav.dart';
@@ -14,10 +15,11 @@ class ClockScreen extends StatefulWidget {
   State<ClockScreen> createState() => _ClockScreenState();
 }
 
-class _ClockScreenState extends State<ClockScreen> {
+class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   CameraController? _controller;
   bool _loading = true;
   bool _processing = false;
+  bool _isInitializing = false;
 
   String _statusText = "Ready";
   bool _success = true; // controls status icon color
@@ -33,8 +35,23 @@ class _ClockScreenState extends State<ClockScreen> {
   @override
   void initState() {
     super.initState();
-    _initCamera();
+    WidgetsBinding.instance.addObserver(this);
     _startClock();
+    _initCamera();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_controller != null && _controller!.value.isInitialized) {
+      if (state == AppLifecycleState.inactive) {
+        _controller!.dispose();
+        _controller = null;
+      } else if (state == AppLifecycleState.resumed) {
+        if (!_isInitializing && _controller == null) {
+          _initCamera();
+        }
+      }
+    }
   }
 
   void _startClock() {
@@ -46,21 +63,77 @@ class _ClockScreenState extends State<ClockScreen> {
   }
 
   Future<void> _initCamera() async {
-    final cameras = await availableCameras();
-    final front = cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.front,
-    );
+    if (_isInitializing) return;
 
-    _controller = CameraController(
-      front,
-      ResolutionPreset.medium,
-      enableAudio: false,
-    );
+    _isInitializing = true;
 
-    await _controller!.initialize();
+    try {
+      // Dispose existing controller if any
+      if (_controller != null) {
+        try {
+          await _controller!.dispose();
+        } catch (e) {
+          print("⚠️ [CLOCK] Error disposing old controller: $e");
+        }
+        _controller = null;
+      }
 
-    if (mounted) {
-      setState(() => _loading = false);
+      // Delay to ensure previous camera is fully released (1.5 seconds for loading)
+      await Future.delayed(const Duration(milliseconds: 1500));
+
+      if (!mounted) {
+        _isInitializing = false;
+        return;
+      }
+
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        print("❌ [CLOCK] No cameras available");
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _isInitializing = false;
+          });
+        }
+        return;
+      }
+
+      final front = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _controller = CameraController(
+        front,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      await _controller!.initialize();
+
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isInitializing = false;
+        });
+        print("✅ [CLOCK] Camera initialized successfully");
+      }
+    } catch (e) {
+      print("❌ [CLOCK] Error initializing camera: $e");
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isInitializing = false;
+        });
+      }
+      // Retry after a delay if initialization failed
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted &&
+            (_controller == null || !_controller!.value.isInitialized)) {
+          _initCamera();
+        }
+      });
     }
   }
 
@@ -90,86 +163,103 @@ class _ClockScreenState extends State<ClockScreen> {
         final imageBase64 = response["image"];
         final record = response["record"];
 
-        setState(() {
-          _recognizedImageBase64 = imageBase64;
-          _emotion = emotion;
-          _employeeName = employee != null ? employee["name"] : null;
-          _hoursWorked = record != null && record["hours_worked"] != null
-              ? record["hours_worked"].toDouble()
-              : null;
+        final employeeName = employee != null
+            ? (employee["full_name"] ?? employee["name"] ?? "")
+            : "";
 
-          _statusText = message.isNotEmpty &&
-                  (message.contains("Already") || message.contains("Clock in"))
-              ? message
-              : (_activeTab == "in"
-                  ? "✔ Clock-In Successful"
-                  : "✔ Clock-Out Successful");
-          _success = true;
+        // Get current time for display
+        final now = DateTime.now();
+        final clockTime = DateFormat('hh:mm:ss a').format(now);
+
+        // Don't store in state - just show dialog
+        setState(() {
+          _processing = false;
         });
 
-        // Show success snackbar with emotion message
-        final emotionMessage = _getEmotionMessage(emotion);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_statusText),
-                if (emotionMessage.isNotEmpty)
-                  Text(
-                    emotionMessage,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 4),
-          ),
+        // Show success dialog
+        _showClockSuccessDialog(
+          imageBase64: imageBase64 ?? "",
+          employeeName: employeeName,
+          emotion: emotion,
+          message: message.isNotEmpty &&
+                  (message.contains("Already") ||
+                      message.contains("Clock in first"))
+              ? message
+              : (_activeTab == "in"
+                  ? "Successfully Clocked In"
+                  : "Successfully Clocked Out"),
+          clockTime: clockTime,
         );
       } else {
         final errorMsg = response["message"] ?? "Failed to recognize";
-        // Ensure message starts with "Failed to recognize" if it doesn't already
-        final displayMsg = errorMsg.contains("Failed to recognize")
-            ? errorMsg
-            : "Failed to recognize - $errorMsg";
 
+        // Don't store in state - just show dialog
         setState(() {
-          _statusText = displayMsg;
-          _success = false;
-          _recognizedImageBase64 = null;
-          _emotion = null;
-          _employeeName = null;
-          _hoursWorked = null;
+          _processing = false;
         });
 
-        // Show error snackbar
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(displayMsg),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
+        // Show error dialog with captured image
+        _showClockErrorDialog(
+          imageBase64: base64Image,
+          message: errorMsg,
         );
       }
     } catch (e) {
       if (!mounted) return;
       final errorMsg = "Camera error: ${e.toString()}";
+
       setState(() {
-        _statusText = errorMsg;
-        _success = false;
-        _recognizedImageBase64 = null;
-        _emotion = null;
-        _employeeName = null;
-        _hoursWorked = null;
+        _processing = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMsg),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
+      // Show error dialog for camera errors too (without image)
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          // Auto-close after 3 seconds
+          Future.delayed(const Duration(seconds: 3), () {
+            if (dialogContext.mounted) {
+              Navigator.of(dialogContext).pop();
+            }
+          });
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1C1A1A),
+            title: Text(
+              "Error",
+              style: GoogleFonts.inter(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            content: Text(
+              errorMsg,
+              style: GoogleFonts.inter(
+                color: Colors.white,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text(
+                  "OK",
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       );
     } finally {
       /// ✅ ALWAYS unlock button
@@ -192,10 +282,202 @@ class _ClockScreenState extends State<ClockScreen> {
     return messages[emotion.toLowerCase()] ?? "Have a great day!";
   }
 
+  void _showClockSuccessDialog({
+    required String imageBase64,
+    required String employeeName,
+    required String emotion,
+    required String message,
+    String? clockTime,
+  }) {
+    final emotionMessage = _getEmotionMessage(emotion);
+    final isWarning =
+        message.contains("Already") || message.contains("Clock in first");
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        // Auto-close after 3 seconds
+        Future.delayed(const Duration(seconds: 3), () {
+          if (dialogContext.mounted) {
+            Navigator.of(dialogContext).pop();
+          }
+        });
+
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1A1A),
+          title: Text(
+            isWarning ? "Notice" : "Success",
+            style: GoogleFonts.inter(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  base64Decode(imageBase64),
+                  width: 200,
+                  height: 200,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                message,
+                style: GoogleFonts.inter(
+                  color: isWarning ? Colors.orange : const Color(0xFF72BF45),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (employeeName.isNotEmpty && !isWarning) ...[
+                const SizedBox(height: 8),
+                Text(
+                  employeeName,
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              if (clockTime != null && !isWarning) ...[
+                const SizedBox(height: 4),
+                Text(
+                  clockTime,
+                  style: GoogleFonts.inter(
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              if (emotionMessage.isNotEmpty && !isWarning) ...[
+                const SizedBox(height: 16),
+                Text(
+                  emotionMessage,
+                  style: GoogleFonts.inter(
+                    color: const Color(0xFF72BF45),
+                    fontSize: 13,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF72BF45),
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                "OK",
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showClockErrorDialog({
+    required String imageBase64,
+    required String message,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        // Auto-close after 3 seconds
+        Future.delayed(const Duration(seconds: 3), () {
+          if (dialogContext.mounted) {
+            Navigator.of(dialogContext).pop();
+          }
+        });
+
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1A1A),
+          title: Text(
+            "Face Not Recognized",
+            style: GoogleFonts.inter(
+              color: Colors.redAccent,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  base64Decode(imageBase64),
+                  width: 200,
+                  height: 200,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Face not recognized. Please retry.",
+                style: GoogleFonts.inter(
+                  color: Colors.redAccent,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: GoogleFonts.inter(
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                "Retry",
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer.cancel();
     _controller?.dispose();
+    _controller = null;
     super.dispose();
   }
 
@@ -334,121 +616,6 @@ class _ClockScreenState extends State<ClockScreen> {
                           ),
 
                           const SizedBox(height: 24),
-
-                          /// RECOGNIZED IMAGE (if available)
-                          if (_recognizedImageBase64 != null)
-                            Container(
-                              margin: const EdgeInsets.only(bottom: 16),
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1C1A1A),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: const Color(0xFF72BF45),
-                                ),
-                              ),
-                              child: Column(
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.memory(
-                                      base64Decode(_recognizedImageBase64!),
-                                      width: 120,
-                                      height: 120,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                  if (_employeeName != null) ...[
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      _employeeName!,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                  if (_emotion != null) ...[
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      _getEmotionMessage(_emotion!),
-                                      style: const TextStyle(
-                                        color: Color(0xFF72BF45),
-                                        fontSize: 14,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-
-                          /// STATUS CARD
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1C1A1A),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: _success
-                                    ? const Color(0xFF72BF45)
-                                    : Colors.redAccent,
-                              ),
-                            ),
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 42,
-                                  height: 42,
-                                  decoration: BoxDecoration(
-                                    color: _success
-                                        ? const Color(0xFF72BF45)
-                                        : Colors.redAccent,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    _success ? Icons.check : Icons.close,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _statusText,
-                                  style: TextStyle(
-                                    color: _success
-                                        ? const Color(0xFF72BF45)
-                                        : Colors.redAccent,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                if (_hoursWorked != null) ...[
-                                  const SizedBox(height: 12),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF72BF45)
-                                          .withOpacity(0.2),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      "Hours Worked: ${_hoursWorked!.toStringAsFixed(2)} hrs",
-                                      style: const TextStyle(
-                                        color: Color(0xFF72BF45),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
                         ],
                       ),
                     ),

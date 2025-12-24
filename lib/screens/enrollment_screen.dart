@@ -9,6 +9,7 @@ import '../services/api_service.dart';
 import '../services/json_storage_service.dart';
 import '../models/employee.dart';
 import '../widgets/bottom_nav.dart';
+import 'package:http/http.dart' as http;
 
 class EnrollmentScreen extends StatefulWidget {
   const EnrollmentScreen({super.key});
@@ -58,46 +59,77 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _controller?.dispose();
+    // Properly dispose camera
+    if (_controller != null) {
+      _controller!.dispose();
+      _controller = null;
+    }
     super.dispose();
   }
 
   Future<void> _loadEmployees() async {
     try {
-      // Load from JSON file
-      // final employees = await JsonStorageService.loadEmployees();
-      final employees = await ApiService.fetchAttendance();
-      print("📋 Loaded ${employees.length} employees from JSON");
+      // Fetch raw employee data from API to check face_embedding field
+      final response = await http
+          .get(Uri.parse("http://192.168.29.91:5000/attendance"))
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw Exception("Request timeout"),
+          );
 
-      // Fetch enrolled employees from backend
-      final enrolledIds = await _getEnrolledEmployeeIds();
-      print("✅ Found ${enrolledIds.length} enrolled employees: $enrolledIds");
+      if (response.statusCode != 200) {
+        throw Exception("Failed to fetch employees: ${response.statusCode}");
+      }
+
+      final decoded = jsonDecode(response.body);
+      List<dynamic> rawEmployees = [];
+
+      if (decoded is List) {
+        rawEmployees = decoded;
+      } else if (decoded is Map && decoded['records'] is List) {
+        rawEmployees = decoded['records'] as List;
+      }
+
+      print("📋 Loaded ${rawEmployees.length} employees from API");
+
+      // Filter out employees who have face_embedding (they are enrolled)
+      final unenrolledRaw = rawEmployees.where((emp) {
+        final faceEmbedding = emp['face_embedding'];
+        // If face_embedding is null, empty, or not present, employee is NOT enrolled
+        final isEnrolled = faceEmbedding != null &&
+            faceEmbedding.toString().trim().isNotEmpty &&
+            faceEmbedding.toString() != 'null';
+
+        if (isEnrolled) {
+          print(
+              "🚫 Filtering out enrolled: ${emp['full_name'] ?? emp['name']} (${emp['code'] ?? emp['employee_id']})");
+        }
+
+        return !isEnrolled; // Only include if NOT enrolled
+      }).toList();
+
+      print(
+          "📝 ${unenrolledRaw.length} employees available (${rawEmployees.length - unenrolledRaw.length} already enrolled)");
+
+      // Convert filtered raw data to Attendance objects
+      final unenrolledEmployees =
+          unenrolledRaw.map((json) => Attendance.fromJson(json)).toList();
 
       setState(() {
-        // Filter out already enrolled employees
-        _availableEmployees = employees;
-
-        print(
-            "📝 ${_availableEmployees.length} employees available for enrollment");
+        _availableEmployees = unenrolledEmployees;
 
         if (_availableEmployees.isNotEmpty && _selectedEmployee == null) {
           _selectedEmployee = _availableEmployees.first;
+        } else if (_availableEmployees.isEmpty) {
+          _selectedEmployee = null;
         }
       });
     } catch (e) {
       print("❌ Error loading employees: $e");
-      // If there's an error, still show employees (they just won't be filtered)
-      try {
-        // final attendance = await JsonStorageService.loadEmployees();
-        setState(() {
-          _availableEmployees = [];
-          if (_availableEmployees.isNotEmpty && _selectedEmployee == null) {
-            _selectedEmployee = _availableEmployees.first;
-          }
-        });
-      } catch (e2) {
-        print("❌ Critical error: $e2");
-      }
+      setState(() {
+        _availableEmployees = [];
+        _selectedEmployee = null;
+      });
     }
   }
 
@@ -124,13 +156,13 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
         try {
           await _controller!.dispose();
         } catch (e) {
-          print("⚠️ Error disposing old controller: $e");
+          print("⚠️ [ENROLL] Error disposing old controller: $e");
         }
         _controller = null;
       }
 
-      // Small delay to ensure previous camera is fully released
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Delay to ensure previous camera is fully released (1.5 seconds for loading)
+      await Future.delayed(const Duration(milliseconds: 1500));
 
       if (!mounted) {
         _isInitializing = false;
@@ -139,7 +171,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        print("❌ No cameras available");
+        print("❌ [ENROLL] No cameras available");
         if (mounted) {
           setState(() {
             _loading = false;
@@ -168,13 +200,10 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
           _loading = false;
           _isInitializing = false;
         });
-        print("✅ Camera initialized successfully in enrollment screen");
-        print("📹 Camera preview size: ${_controller!.value.previewSize}");
-        print("📹 Camera aspect ratio: ${_controller!.value.aspectRatio}");
-        print("📹 Camera is initialized: ${_controller!.value.isInitialized}");
+        print("✅ [ENROLL] Camera initialized successfully");
       }
     } catch (e) {
-      print("❌ Error initializing camera in enrollment screen: $e");
+      print("❌ [ENROLL] Error initializing camera: $e");
       if (mounted) {
         setState(() {
           _loading = false;
@@ -182,7 +211,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
         });
       }
       // Retry after a delay if initialization failed
-      Future.delayed(const Duration(seconds: 1), () {
+      Future.delayed(const Duration(seconds: 2), () {
         if (mounted &&
             (_controller == null || !_controller!.value.isInitialized)) {
           _initCamera();
@@ -380,18 +409,19 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
       if (result["success"] == true) {
         // Remove from available list
         setState(() {
-          _availableEmployees.remove(_selectedEmployee);
-          if (_availableEmployees.isNotEmpty) {
-            _selectedEmployee = null; // Don't auto-select, let user choose
-          } else {
-            _selectedEmployee = null;
-          }
+          _availableEmployees.removeWhere((emp) =>
+              emp.uuid == _selectedEmployee!.uuid ||
+              emp.code == _selectedEmployee!.code);
+          _selectedEmployee = null; // Clear selection
           _searchQuery = "";
           _processing = false;
           _confirmedImageBase64 =
               null; // Clear confirmed image after successful enrollment
           _statusText = "✔ Enrollment successful";
         });
+
+        // Reload the employee list to ensure it's up-to-date with backend
+        await _loadEmployees();
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

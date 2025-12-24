@@ -65,31 +65,120 @@ class ApiService {
 
   static Future<List<Attendance>> fetchAttendance() async {
     try {
-      final response =
-          await http.get(Uri.parse("$_baseUrl/attendance")).timeout(
-                const Duration(seconds: 10),
-                onTimeout: () => throw Exception("Request timeout"),
-              );
+      // Use the direct API route
+      const String apiUrl = "https://workforce.dsignzmedia.com/api/attendance";
+      print("🌐 [API] ========== FETCHING ATTENDANCE ==========");
+      print("🌐 [API] Route: GET $apiUrl");
+
+      final response = await http.get(Uri.parse(apiUrl)).timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw Exception("Request timeout"),
+          );
+
+      print("🌐 [API] Response status: ${response.statusCode}");
+      print(
+          "🌐 [API] Response body length: ${response.body.length} characters");
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
+        print("📊 [API] Response type: ${decoded.runtimeType}");
 
+        // Check if response has status field
+        if (decoded is Map && decoded['status'] == true) {
+          print("✅ [API] API returned success status");
+
+          // Get the data object
+          final data = decoded['data'];
+          print("📊 [API] Data type: ${data.runtimeType}");
+
+          if (data is Map) {
+            // Extract employees and interns arrays
+            final employees = data['employees'] ?? [];
+            final interns = data['interns'] ?? [];
+            final allRecords = [...employees, ...interns];
+
+            print("📊 [API] ✅ Found data structure");
+            print("📊 [API] Date in response: ${data['date']}");
+            print(
+                "📊 [API] Employees: ${employees.length}, Interns: ${interns.length}");
+            print("📊 [API] Total records: ${allRecords.length}");
+
+            if (allRecords.isNotEmpty) {
+              print(
+                  "📊 [API] Sample employee record keys: ${(employees.isNotEmpty ? employees[0] : {}).keys}");
+              print(
+                  "📊 [API] Sample intern record keys: ${(interns.isNotEmpty ? interns[0] : {}).keys}");
+              if (employees.isNotEmpty) {
+                print("📊 [API] Sample employee: ${employees[0]}");
+              }
+              if (interns.isNotEmpty) {
+                print("📊 [API] Sample intern: ${interns[0]}");
+              }
+            }
+
+            // Map all records to Attendance objects
+            return allRecords.map((json) => Attendance.fromJson(json)).toList();
+          } else if (data is List) {
+            // If data is directly a list
+            print("📊 [API] ✅ Data is a List with ${data.length} records");
+            if (data.isNotEmpty) {
+              print("📊 [API] Sample record: ${data[0]}");
+            }
+            return data.map((json) => Attendance.fromJson(json)).toList();
+          } else {
+            print("⚠️ [API] Unknown data structure: ${data.runtimeType}");
+            return [];
+          }
+        } else if (decoded is Map && decoded['status'] == false) {
+          print("❌ [API] API returned error status");
+          print("❌ [API] Message: ${decoded['message']}");
+          return [];
+        }
+
+        // Fallback: Handle if response doesn't have status field
+        // Handle List response (direct array of attendance records)
         if (decoded is List) {
+          print("📊 [API] ✅ Response is a List with ${decoded.length} records");
+          if (decoded.isNotEmpty) {
+            print("📊 [API] First record: ${decoded[0]}");
+          }
           return decoded.map((json) => Attendance.fromJson(json)).toList();
         }
 
+        // Handle Map with 'records' key
         if (decoded is Map && decoded['records'] is List) {
-          return (decoded['records'] as List)
-              .map((json) => Attendance.fromJson(json))
-              .toList();
+          final recordsList = decoded['records'] as List;
+          print(
+              "📊 [API] ✅ Found Map with 'records' key: ${recordsList.length} records");
+          return recordsList.map((json) => Attendance.fromJson(json)).toList();
         }
 
+        // Handle Map with 'data' key containing employees/interns (old structure)
+        if (decoded is Map && decoded['data'] is Map) {
+          final data = decoded['data'] as Map;
+          final employees = data['employees'] ?? [];
+          final interns = data['interns'] ?? [];
+          final allRecords = [...employees, ...interns];
+          print("📊 [API] ✅ Found Map with 'data' key");
+          print(
+              "📊 [API] Employees: ${employees.length}, Interns: ${interns.length}");
+          return allRecords.map((json) => Attendance.fromJson(json)).toList();
+        }
+
+        // Unknown structure
+        print("⚠️ [API] Unknown response structure");
+        if (decoded is Map) {
+          print("⚠️ [API] Map keys: ${decoded.keys}");
+        }
         return [];
       } else {
+        print("❌ [API] Request failed with status: ${response.statusCode}");
+        print("❌ [API] Response body: ${response.body}");
         return [];
       }
-    } catch (e) {
-      print("Error fetching attendance: $e");
+    } catch (e, stackTrace) {
+      print("❌ [API] Error fetching attendance: $e");
+      print("❌ [API] Stack trace: $stackTrace");
       return [];
     }
   }

@@ -15,7 +15,7 @@ EMPLOYEE_FILE = "employees.json"
 ATTENDANCE_FILE = "attendance.json"
 
 MODEL_NAME = "Facenet"
-DISTANCE_THRESHOLD = 0.75
+DISTANCE_THRESHOLD = 0.70
 
 
 # ---------- Utilities ----------

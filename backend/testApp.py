@@ -10,6 +10,9 @@ import sys
 from datetime import datetime
 from deepface import DeepFace
 from PIL import Image
+from datetime import timedelta
+import threading
+import time
 import requests
 
 app = Flask(__name__)
@@ -19,7 +22,7 @@ EMPLOYEE_FILE = "employees.json"
 ATTENDANCE_FILE = "attendance.json"
 
 MODEL_NAME = "Facenet"
-DISTANCE_THRESHOLD = 0.75
+DISTANCE_THRESHOLD = 0.7
 SIMILARITY_THRESHOLD = 0.7
 
 
@@ -40,6 +43,120 @@ def fetchAttendance():
     else:
         return load_json(ATTENDANCE_FILE);
 
+def auto_clockout_active_sessions():
+    """
+    Auto clock-out active sessions that have been active for 90+ minutes.
+    This runs in the background to automatically close forgotten sessions.
+    Auto clock-out executes ONLY after 10:00 PM (22:00) of the same day.
+    """
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+        AUTO_CLOCKOUT_MINUTES = 90
+        
+        # 10 PM TIME GATE: Auto clock-out executes ONLY after 10:00 PM (22:00) of the same day
+        cutoff_time = datetime.strptime(f"{today} 22:00:00", "%Y-%m-%d %H:%M:%S")
+        if now < cutoff_time:
+            # Before 10 PM - skip auto clock-out
+            return
+        
+        # After 10 PM - proceed with auto clock-out logic
+        print(f"🕙 [AUTO CLOCK-OUT] Current time {now.strftime('%H:%M:%S')} is after 10:00 PM - checking for active sessions...")
+        sys.stdout.flush()
+        
+        # Fetch all attendance records from API
+        try:
+            response = requests.get(url + "/attendance")
+            if response.status_code != 200:
+                return
+            
+            data = response.json()
+            attendance_records = []
+            if isinstance(data, dict) and "data" in data:
+                data_obj = data.get("data", {})
+                employees = data_obj.get("employees", [])
+                interns = data_obj.get("interns", [])
+                attendance_records = employees + interns
+            elif isinstance(data, list):
+                attendance_records = data
+            
+            # Find all active sessions (clock_in without clock_out) for today
+            for record in attendance_records:
+                if not isinstance(record, dict):
+                    continue
+                
+                record_date = record.get("date")
+                clock_in_raw = record.get("clock_in_time") or record.get("clock_in")
+                clock_out_raw = record.get("clock_out_time") or record.get("clock_out")
+           
+                # Skip if not today or already clocked out
+                if record_date != today or clock_out_raw:
+                    continue
+                
+                if clock_in_raw:
+                    try:
+                        # Parse clock-in time
+                        if " " in str(clock_in_raw):
+                            clock_in_str = str(clock_in_raw)
+                        else:
+                            clock_in_str = f"{today} {clock_in_raw}"
+                        
+                        clock_in_dt = datetime.strptime(clock_in_str, "%Y-%m-%d %H:%M:%S")
+                        
+                        # Calculate elapsed time
+                        elapsed_minutes = (now - clock_in_dt).total_seconds() / 60
+                        
+                        # Auto clock-out if >= 90 minutes
+                        if elapsed_minutes >= AUTO_CLOCKOUT_MINUTES:
+                            user_id = record.get("uuid")
+                            user_type = record.get("type") or ("intern" if (record.get("code") or "").startswith("INT") else "employee")
+                            
+                            # Calculate auto clock-out time (clock_in + 90 minutes)
+                            auto_clockout_dt = clock_in_dt + timedelta(minutes=AUTO_CLOCKOUT_MINUTES)
+                            auto_clockout_time = auto_clockout_dt.strftime("%H:%M:%S")
+                            
+                            # Calculate hours worked (90 minutes = 1.5 hours)
+                            hours_worked = AUTO_CLOCKOUT_MINUTES / 60.0
+                            
+                            # Send auto clock-out to API
+                            clock_out_data = {
+                                "user_id": user_id,
+                                "date": today,
+                                "clock_out": auto_clockout_time,
+                                "hours_worked": round(hours_worked, 2),
+                                "user_type": user_type,
+                                "auto_clockout": True  # Flag to indicate auto clock-out
+                            }
+                            
+                            response = requests.post(url + "/attendance", json=clock_out_data)
+                            if response.status_code in [200, 201]:
+                                print(f"✅ [AUTO CLOCK-OUT] Auto clocked out user {record.get('full_name') or record.get('name')} at {auto_clockout_time} (session was active for {elapsed_minutes:.1f} minutes)")
+                            else:
+                                print(f"⚠️ [AUTO CLOCK-OUT] Failed to auto clock-out user {record.get('full_name') or record.get('name')}: {response.status_code}")
+                    except Exception as e:
+                        print(f"❌ [AUTO CLOCK-OUT] Error processing record: {e}")
+                        continue
+        except Exception as e:
+            print(f"❌ [AUTO CLOCK-OUT] Error fetching attendance: {e}")
+    except Exception as e:
+        print(f"❌ [AUTO CLOCK-OUT] Critical error: {e}")
+
+def start_auto_clockout_thread():
+    """Start background thread to periodically check and auto clock-out active sessions"""
+    def run_auto_clockout():
+        while True:
+            try:
+                auto_clockout_active_sessions()
+                # Check every 5 minutes
+                time.sleep(300)
+            except Exception as e:
+                print(f"❌ [AUTO CLOCK-OUT THREAD] Error: {e}")
+                time.sleep(60)  # Wait 1 minute before retrying on error
+    
+    thread = threading.Thread(target=run_auto_clockout, daemon=True)
+    thread.start()
+    print("✅ [AUTO CLOCK-OUT] Background thread started (checks every 5 minutes)")
+    sys.stdout.flush()
 
 def ensure_file(path, default):
     if not os.path.exists(path):
@@ -629,13 +746,13 @@ def recognize():
         print(f"👤 [RECOGNITION LOG] User type: {user_type}")
         sys.stdout.flush()
 
-        # Fetch today's attendance from API to check if user clocked in
-        last = None
+        # Fetch today's attendance from API to find ACTIVE sessions
+        active_session = None  # Most recent ACTIVE session (has clock_in but no clock_out)
+        all_today_records = []  # All records for today (for cumulative hours calculation)
+        
         try:
             print(f"\n🔍 [ATTENDANCE CHECK] Fetching today's attendance from API for user_id: {user_id}, date: {today}")
             sys.stdout.flush()
-            # Adjust the endpoint based on your API structure
-            # Option 1: If API has endpoint like /attendance?user_id=...&date=...
             response = requests.get(
                 url + "/attendance",
                 params={"user_id": user_id, "date": today, "user_type": user_type}
@@ -644,13 +761,12 @@ def recognize():
             if response.status_code == 200:
                 data = response.json()
                 
-                # Parse the API response structure: data.data.employees and data.data.interns
+                # Parse the API response structure
                 attendance_records = []
                 if isinstance(data, dict) and "data" in data:
                     data_obj = data.get("data", {})
                     employees = data_obj.get("employees", [])
                     interns = data_obj.get("interns", [])
-                    # Combine employees and interns lists
                     attendance_records = employees + interns
                     print(f"📊 [ATTENDANCE CHECK] Found {len(employees)} employees and {len(interns)} interns")
                 elif isinstance(data, list):
@@ -658,24 +774,39 @@ def recognize():
                 else:
                     attendance_records = []
                 
-                # Find the most recent record for today that has clock_in but no clock_out
-                for record in reversed(attendance_records):
+                # Find ALL records for today for this user
+                for record in attendance_records:
                     if not isinstance(record, dict):
-                        print(f"⚠️ [ATTENDANCE CHECK] Skipping non-dict record: {type(record)} - {record}")
                         continue
                     record_user_id = record.get("uuid")
                     record_date = record.get("date")
                     if record_user_id == user_id and record_date == today:
-                        clock_in_time = record.get("clock_in_time")
-                        clock_out_time = record.get("clock_out_time")
-                        if clock_in_time and not clock_out_time:
-                            last = record
-                            print(f"✅ [ATTENDANCE CHECK] Found clock-in record: clock_in_time={clock_in_time}")
-                            sys.stdout.flush()
-                            break
-                else:
-                    print(f"ℹ️ [ATTENDANCE CHECK] No active clock-in found for today")
-                    sys.stdout.flush()
+                        all_today_records.append(record)
+                
+                # Find the most recent ACTIVE session (clock_in without clock_out)
+                active_sessions = []
+                for record in all_today_records:
+                    clock_in_time = record.get("clock_in_time") or record.get("clock_in")
+                    clock_out_time = record.get("clock_out_time") or record.get("clock_out")
+                    
+                    # Active session: has clock_in but no clock_out
+                    if clock_in_time and not clock_out_time:
+                        active_sessions.append(record)
+                
+                # Sort active sessions by clock_in time (most recent first)
+                if active_sessions:
+                    active_sessions.sort(
+                        key=lambda x: x.get("clock_in_time") or x.get("clock_in") or "",
+                        reverse=True
+                    )
+                    active_session = active_sessions[0]
+                
+                print(f"📊 [ATTENDANCE CHECK] Found {len(all_today_records)} total record(s) for today")
+                print(f"📊 [ATTENDANCE CHECK] Found {len(active_sessions)} active session(s)")
+                if active_session:
+                    clock_in = active_session.get("clock_in_time") or active_session.get("clock_in")
+                    print(f"📊 [ATTENDANCE CHECK] Most recent active session: clock_in={clock_in}")
+                sys.stdout.flush()
             else:
                 print(f"⚠️ [ATTENDANCE CHECK] API returned status {response.status_code}: {response.text[:200]}")
                 sys.stdout.flush()
@@ -684,31 +815,42 @@ def recognize():
             import traceback
             traceback.print_exc()
             sys.stdout.flush()
-            # Continue anyway, will handle as no clock-in found
 
         if action == "in":
-            if last and  last.get("clock_in") and not last.get("clock_out"):
+            # SESSION-BASED: Always allow clock-in (creates new session)
+            # Check if user already has an active clock-in session
+            if active_session:
+                clock_in_time = active_session.get("clock_in_time") or active_session.get("clock_in")
+                print(f"🚫 [ATTENDANCE LOG] User already clocked in at {clock_in_time}")
                 return jsonify({
                     "matched": True,
-                    "message": "Already clocked in",
+                    "message": f"Already clocked in {employee_name} at {clock_in_time}. Please clock out first.",
                     "employee": best_match,
                     "emotion": emotion,
-                    "image":img_data
-                })
-
+                    "image": img_data
+                }), 200
+            
+            # Create NEW record with ALL required fields
+            # IMPORTANT: clock_in should be only time (HH:MM:SS), not full datetime
             record = {
                 "user_id": user_id,
+                "uuid": user_id,
                 "full_name": employee_name,
-                "date": today,
-                "clock_in": now,
-                "clock_out": None,
+                "name": employee_name,
+                "date": today,  # Date separately
+                "clock_in": now,  # Time only: "19:46:48" (already in HH:MM:SS format)
+                "clock_in_time": now,  # Time only
+                "clock_out": None,  # No clock-out yet
+                "clock_out_time": None,
                 "hours_worked": None,
-                "user_type": user_type
+                "user_type": user_type,
+                "type": user_type,
+                "code": best_match.get("code") or best_match.get("employee_id")
             }
             
-            # Send clock-in to API
+            # Send clock-in to API (creates NEW record)
             try:
-                print(f"\n💾 [ATTENDANCE LOG] Sending clock-in to API...")
+                print(f"\n💾 [ATTENDANCE LOG] Sending clock-in to API (new session)...")
                 print(f"📦 [ATTENDANCE LOG] Attendance data: {record}")
                 sys.stdout.flush()
                 
@@ -734,59 +876,62 @@ def recognize():
                 }), 500
 
         elif action == "out":
-            if not last or not last.get("clock_in_time"):
+            # SESSION-BASED: Clock-out only if there's an ACTIVE session
+            if not active_session:
                 return jsonify({
                     "matched": True,
                     "message": "Clock in first",
                     "employee": best_match,
                     "emotion": emotion,
-                    "image":img_data
-                })
-            
-            # Already clocked out check
-            if last.get("clock_out"):
-                return jsonify({
-                    "matched": True,
-                    "message": "Already clocked out",
-                    "employee": best_match,
-                    "emotion": emotion,
                     "image": img_data
                 })
-
-            # Calculate hours worked
-            clock_in_time_str = last.get("clock_in_time")
+            
+            # Get clock-in time from active session
+            clock_in_time_str = active_session.get("clock_in_time") or active_session.get("clock_in")
+            
+            # Extract only the time portion (HH:MM:SS) from clock_in
+            # Handle both formats: "2025-12-24 19:46:48" or "19:46:48"
             if clock_in_time_str:
-                # API returns full datetime string "2025-12-23 15:13:59", extract just time part
-                if " " in clock_in_time_str:
-                    clock_in_time_only = clock_in_time_str.split(" ")[1]  # Extract "15:13:59"
+                if " " in str(clock_in_time_str):
+                    # Full datetime string - extract time portion
+                    clock_in_time_only = str(clock_in_time_str).split(" ")[1]
                 else:
-                    clock_in_time_only = clock_in_time_str
+                    # Already just time
+                    clock_in_time_only = str(clock_in_time_str)
                 
+                # Parse for hours calculation
                 clock_in_time = datetime.strptime(f"{today} {clock_in_time_only}", "%Y-%m-%d %H:%M:%S")
                 clock_out_time = datetime.strptime(f"{today} {now}", "%Y-%m-%d %H:%M:%S")
                 hours_worked = (clock_out_time - clock_in_time).total_seconds() / 3600
             else:
+                clock_in_time_only = None
                 hours_worked = None
 
-            # Prepare clock-out data for API update
+            # Prepare COMPLETE clock-out data for API
+            # IMPORTANT: Send only time portion (HH:MM:SS), not full datetime
             clock_out_data = {
                 "user_id": user_id,
+                "uuid": user_id,
+                "full_name": employee_name,
+                "name": employee_name,
                 "date": today,
-                "clock_out": now,
+                "clock_in": clock_in_time_only,  # Only time portion: "19:46:48"
+                "clock_in_time": clock_in_time_only,  # Only time portion
+                "clock_out": now,  # Already in HH:MM:SS format
+                "clock_out_time": now,  # Already in HH:MM:SS format
                 "hours_worked": round(hours_worked, 2) if hours_worked else None,
-                "user_type": user_type
+                "user_type": user_type,
+                "code": best_match.get("code") or best_match.get("employee_id"),
+                "type": user_type
             }
-
             
-            # Send clock-out to API (update existing record)
+            # Send clock-out to API
             try:
-                print(f"\n💾 [ATTENDANCE LOG] Sending clock-out to API...")
+                print(f"\n💾 [ATTENDANCE LOG] Sending clock-out to API (closing active session)...")
                 print(f"📦 [ATTENDANCE LOG] Clock-out data: {clock_out_data}")
                 sys.stdout.flush()
                 
-                # Use POST /attendance for clock-out (same endpoint as clock-in)
                 response = requests.post(url + "/attendance", json=clock_out_data)
-                
                 print(f"🌐 [ATTENDANCE LOG] API Response status: {response.status_code}")
                 print(f"🌐 [ATTENDANCE LOG] API Response text: {response.text[:200]}")
                 sys.stdout.flush()
@@ -798,14 +943,40 @@ def recognize():
                         "message": f"Failed to save clock-out: {response.status_code}"
                     }), 500
 
-        # Prepare record for response
+                # Calculate cumulative hours worked for all sessions today
+                total_hours = 0.0
+                session_hours = []
+                for record in all_today_records:
+                    clock_out = record.get("clock_out_time") or record.get("clock_out")
+                    hours = record.get("hours_worked")
+                    if clock_out and hours:
+                        total_hours += float(hours)
+                        session_hours.append(float(hours))
+                
+                # Add current session hours
+                if hours_worked:
+                    total_hours += hours_worked
+                    session_hours.append(hours_worked)
+                
+                print(f"📊 [CUMULATIVE HOURS] Total hours worked today: {total_hours:.2f} hrs (sessions: {[f'{h:.2f}' for h in session_hours]})")
+                sys.stdout.flush()
+
+                # Prepare record for response (complete record with both times)
                 record = {
                     "user_id": user_id,
+                    "uuid": user_id,
                     "full_name": employee_name,
+                    "name": employee_name,
                     "date": today,
-                    "clock_in": clock_in_time_str,
-                    "clock_out": now,
-                    "hours_worked": round(hours_worked, 2) if hours_worked else None
+                    "clock_in": clock_in_time_only,  # Only time portion
+                    "clock_in_time": clock_in_time_only,  # Only time portion
+                    "clock_out": now,  # Already in HH:MM:SS format
+                    "clock_out_time": now,  # Already in HH:MM:SS format
+                    "hours_worked": round(hours_worked, 2) if hours_worked else None,
+                    "total_hours_today": round(total_hours, 2),
+                    "user_type": user_type,
+                    "type": user_type,
+                    "code": best_match.get("code") or best_match.get("employee_id")
                 }
             except Exception as e:
                 print(f"❌ [ATTENDANCE LOG] Error sending clock-out to API: {e}")
@@ -870,12 +1041,17 @@ def initialize_files():
     except Exception as e:
         print(f"⚠️ Error initializing files: {e}")
 
+
 if __name__ == '__main__':
     initialize_files()
     print("\n" + "="*60)
     print("🚀 [SERVER START] Flask server starting...")
     print("="*60)
     sys.stdout.flush()
+    
+    # Start background thread for auto clock-out
+    start_auto_clockout_thread()
+    
     app.run(
         host="192.168.29.91",  # your machine’s IP
         port=5000,
