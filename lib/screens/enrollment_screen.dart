@@ -69,31 +69,51 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
   Future<void> _loadEmployees() async {
     try {
-      // Fetch raw employee data from API to check face_embedding field
+      print("🔍 [ENROLL] Fetching employees from production API...");
+
+      // Fetch from production API's active endpoint which has employee data with face_embedding
       final response = await http
-          .get(Uri.parse("http://192.168.29.91:5000/attendance"))
+          .get(Uri.parse("https://workforce.dsignzmedia.com/api/active"))
           .timeout(
             const Duration(seconds: 10),
             onTimeout: () => throw Exception("Request timeout"),
           );
+
+      print("🌐 [ENROLL] Response status: ${response.statusCode}");
 
       if (response.statusCode != 200) {
         throw Exception("Failed to fetch employees: ${response.statusCode}");
       }
 
       final decoded = jsonDecode(response.body);
-      List<dynamic> rawEmployees = [];
+      print("📊 [ENROLL] Response type: ${decoded.runtimeType}");
 
-      if (decoded is List) {
+      List<dynamic> rawEmployees = [];
+      List<dynamic> rawInterns = [];
+
+      // Handle the API response structure: { "data": { "employees": [...], "interns": [...] } }
+      if (decoded is Map && decoded['data'] is Map) {
+        final data = decoded['data'] as Map;
+        rawEmployees = data['employees'] ?? [];
+        rawInterns = data['interns'] ?? [];
+        print(
+            "📊 [ENROLL] Found ${rawEmployees.length} employees and ${rawInterns.length} interns");
+      } else if (decoded is List) {
+        // Fallback: if it's a direct list
         rawEmployees = decoded;
+        print("📊 [ENROLL] Found ${rawEmployees.length} items in list");
       } else if (decoded is Map && decoded['records'] is List) {
         rawEmployees = decoded['records'] as List;
+        print("📊 [ENROLL] Found ${rawEmployees.length} records");
       }
 
-      print("📋 Loaded ${rawEmployees.length} employees from API");
+      // Combine employees and interns
+      final allRaw = [...rawEmployees, ...rawInterns];
+      print(
+          "📋 [ENROLL] Total loaded: ${allRaw.length} (${rawEmployees.length} employees + ${rawInterns.length} interns)");
 
       // Filter out employees who have face_embedding (they are enrolled)
-      final unenrolledRaw = rawEmployees.where((emp) {
+      final unenrolledRaw = allRaw.where((emp) {
         final faceEmbedding = emp['face_embedding'];
         // If face_embedding is null, empty, or not present, employee is NOT enrolled
         final isEnrolled = faceEmbedding != null &&
@@ -102,14 +122,14 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
         if (isEnrolled) {
           print(
-              "🚫 Filtering out enrolled: ${emp['full_name'] ?? emp['name']} (${emp['code'] ?? emp['employee_id']})");
+              "🚫 [ENROLL] Filtering out enrolled: ${emp['full_name'] ?? emp['name']} (${emp['code'] ?? emp['employee_id']})");
         }
 
         return !isEnrolled; // Only include if NOT enrolled
       }).toList();
 
       print(
-          "📝 ${unenrolledRaw.length} employees available (${rawEmployees.length - unenrolledRaw.length} already enrolled)");
+          "📝 [ENROLL] ${unenrolledRaw.length} employees available for enrollment (${allRaw.length - unenrolledRaw.length} already enrolled)");
 
       // Convert filtered raw data to Attendance objects
       final unenrolledEmployees =
@@ -120,16 +140,31 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
         if (_availableEmployees.isNotEmpty && _selectedEmployee == null) {
           _selectedEmployee = _availableEmployees.first;
+          print(
+              "✅ [ENROLL] Selected first employee: ${_selectedEmployee!.name}");
         } else if (_availableEmployees.isEmpty) {
           _selectedEmployee = null;
+          print("⚠️ [ENROLL] No employees available for enrollment");
         }
       });
-    } catch (e) {
-      print("❌ Error loading employees: $e");
+    } catch (e, stackTrace) {
+      print("❌ [ENROLL] Error loading employees: $e");
+      print("❌ [ENROLL] Stack trace: $stackTrace");
       setState(() {
         _availableEmployees = [];
         _selectedEmployee = null;
       });
+
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed to load employees: ${e.toString()}"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 

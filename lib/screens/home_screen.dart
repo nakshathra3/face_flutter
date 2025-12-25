@@ -59,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       print("🔍 [HOME] Fetching attendance data...");
       final data = await ApiService.fetchAttendance();
+      print("dataaaaaa: $data");
       print("📊 [HOME] Fetched ${data.length} total records from API");
 
       // Get today's date in YYYY-MM-DD format
