@@ -350,11 +350,15 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.memory(
-                base64Decode(imageBase64),
-                width: 200,
-                height: 200,
-                fit: BoxFit.cover,
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()..scale(-1.0, 1.0), // Flip horizontally
+                child: Image.memory(
+                  base64Decode(imageBase64),
+                  width: 200,
+                  height: 200,
+                  fit: BoxFit.cover,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -889,9 +893,9 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
     } else if (_countingDown) {
       buttonText = "Get ready...";
     } else if (hasConfirmedImage) {
-      buttonText = "Enroll Face";
+      buttonText = "Enroll Employee";
     } else {
-      buttonText = "Capture Image";
+      buttonText = "Capture Face";
     }
 
     return ElevatedButton.icon(

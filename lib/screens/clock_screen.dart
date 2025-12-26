@@ -318,11 +318,16 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.memory(
-                  base64Decode(imageBase64),
-                  width: 200,
-                  height: 200,
-                  fit: BoxFit.cover,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..scale(-1.0, 1.0), // Flip horizontally
+                  child: Image.memory(
+                    base64Decode(imageBase64),
+                    width: 200,
+                    height: 200,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -411,7 +416,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         return AlertDialog(
           backgroundColor: const Color(0xFF1C1A1A),
           title: Text(
-            "Face Not Recognized",
+            "Face Not Identified",
             style: GoogleFonts.inter(
               color: Colors.redAccent,
               fontWeight: FontWeight.bold,
@@ -422,16 +427,21 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.memory(
-                  base64Decode(imageBase64),
-                  width: 200,
-                  height: 200,
-                  fit: BoxFit.cover,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..scale(-1.0, 1.0), // Flip horizontally
+                  child: Image.memory(
+                    base64Decode(imageBase64),
+                    width: 200,
+                    height: 200,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
               Text(
-                "Face not recognized. Please retry.",
+                "Face not identified. Please retry.",
                 style: GoogleFonts.inter(
                   color: Colors.redAccent,
                   fontSize: 16,
@@ -439,15 +449,15 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                 ),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                style: GoogleFonts.inter(
-                  color: Colors.grey,
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
+              // const SizedBox(height: 8),
+              // Text(
+              //   message,
+              //   style: GoogleFonts.inter(
+              //     color: Colors.grey,
+              //     fontSize: 12,
+              //   ),
+              //   textAlign: TextAlign.center,
+              //),
             ],
           ),
           actions: [
