@@ -933,6 +933,11 @@ def recognize():
             
             # Create NEW record with ALL required fields
             # IMPORTANT: clock_in should be only time (HH:MM:SS), not full datetime
+            import time
+            session_id = f"{user_id}_{today}_{int(time.time())}"  # Unique session ID
+            print(f"🌐 [ATTENDANCE LOG] Session ID: {session_id}")
+            sys.stdout.flush()
+
             record = {
                 "user_id": user_id,
                 "uuid": user_id,
@@ -946,12 +951,15 @@ def recognize():
                 "hours_worked": None,
                 "user_type": user_type,
                 "type": user_type,
-                "code": best_match.get("code") or best_match.get("employee_id")
+                "code": best_match.get("code") or best_match.get("employee_id"),
+                "session_id": session_id,  # Unique identifier to ensure new record creation
+                "is_new_session": True  # Flag to indicate this is a new session, not an update
             }
             
             # Send clock-in to API (creates NEW record)
             try:
                 print(f"\n💾 [ATTENDANCE LOG] Sending clock-in to API (new session)...")
+                print(f"📦 [ATTENDANCE LOG] Session ID: {session_id}")
                 print(f"📦 [ATTENDANCE LOG] Attendance data: {record}")
                 sys.stdout.flush()
                 
@@ -990,6 +998,10 @@ def recognize():
             # Get clock-in time from active session
             clock_in_time_str = active_session.get("clock_in_time") or active_session.get("clock_in")
             
+            # Get session_id from active session if it exists
+            session_id = active_session.get("session_id")
+            print(f"📦 [ATTENDANCE LOG] Session ID: {session_id}")
+
             # Extract only the time portion (HH:MM:SS) from clock_in
             # Handle both formats: "2025-12-24 19:46:48" or "19:46:48"
             if clock_in_time_str:
@@ -1023,7 +1035,9 @@ def recognize():
                 "hours_worked": round(hours_worked, 2) if hours_worked else None,
                 "user_type": user_type,
                 "code": best_match.get("code") or best_match.get("employee_id"),
-                "type": user_type
+                "type": user_type,
+                "session_id": session_id,  # Include session_id to identify the session to update
+                "is_new_session": False  # Flag to indicate this is an update, not a new record.
             }
             
             # Send clock-out to API
