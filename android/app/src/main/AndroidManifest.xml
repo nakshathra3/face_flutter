@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     
     <application
-        android:label="working_emu"
+        android:label="Workforce Detector"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
