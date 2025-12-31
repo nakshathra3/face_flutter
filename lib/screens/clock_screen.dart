@@ -15,6 +15,140 @@ class ClockScreen extends StatefulWidget {
   State<ClockScreen> createState() => _ClockScreenState();
 }
 
+// Add this custom widget class before _ClockScreenState
+
+class ArcProgressIndicator extends StatefulWidget {
+  final double progress; // 0.0 to 1.0
+  final Color color;
+  final double strokeWidth;
+  final double size;
+
+  const ArcProgressIndicator({
+    super.key,
+    required this.progress,
+    this.color = const Color(0xFF72BF45),
+    this.strokeWidth = 8.0,
+    this.size = 60.0,
+  });
+
+  @override
+  State<ArcProgressIndicator> createState() => _ArcProgressIndicatorState();
+}
+
+class _ArcProgressIndicatorState extends State<ArcProgressIndicator>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _animation = Tween<double>(begin: 0.0, end: widget.progress).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(ArcProgressIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.progress != widget.progress) {
+      _animation = Tween<double>(
+              begin: oldWidget.progress, end: widget.progress)
+          .animate(
+              CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+      _controller.reset();
+      _controller.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: AnimatedBuilder(
+        animation: _animation,
+        builder: (context, child) {
+          return CustomPaint(
+            painter: ArcProgressPainter(
+              progress: _animation.value,
+              color: widget.color,
+              strokeWidth: widget.strokeWidth,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class ArcProgressPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  final double strokeWidth;
+
+  ArcProgressPainter({
+    required this.progress,
+    required this.color,
+    required this.strokeWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - strokeWidth) / 2;
+
+    // Draw background arc (subtle)
+    final backgroundPaint = Paint()
+      ..color = color.withOpacity(0.2)
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -90 * (3.14159 / 180), // Start from top
+      360 * (3.14159 / 180), // Full circle
+      false,
+      backgroundPaint,
+    );
+
+    // Draw progress arc
+    final sweepAngle = 360 * progress * (3.14159 / 180);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -90 * (3.14159 / 180), // Start from top
+      sweepAngle,
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(ArcProgressPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.color != color ||
+        oldDelegate.strokeWidth != strokeWidth;
+  }
+}
+
 class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   CameraController? _controller;
   bool _loading = true;
@@ -31,6 +165,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
 
   late Timer _timer;
   DateTime _now = DateTime.now();
+
+  // Add progress tracking
+  double _progress = 0.0;
 
   @override
   void initState() {
@@ -137,24 +274,41 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// ✅ FIXED CAPTURE LOGIC
+  /// ✅ FIXED CAPTURE LOGIC WITH LIVE PROGRESS
   Future<void> _captureAndSend() async {
     if (_processing || _controller == null) return;
 
     setState(() {
       _processing = true;
+      _progress = 0.0;
       _statusText = "Scanning face...";
       _success = true;
     });
 
     try {
+      // Step 1: Capturing image (0-25%)
+      _updateProgressSmoothly(0.25,
+          duration: const Duration(milliseconds: 400));
       final image = await _controller!.takePicture();
+
+      // Step 2: Reading and encoding (25-50%)
+      _updateProgressSmoothly(0.50,
+          duration: const Duration(milliseconds: 300));
       final bytes = await image.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      final response = await ApiService.recognizeFace(base64Image, _activeTab);
+      // Step 3: Sending to API (50-90%)
+      // Start API call and update progress gradually during the call
+      final apiCall = ApiService.recognizeFace(base64Image, _activeTab);
+
+      // Update progress gradually during API call (50% to 90%)
+      final response = await _updateProgressDuringApiCall(0.50, 0.90, apiCall);
 
       if (!mounted) return;
+
+      // Step 4: Processing response (90-100%)
+      _updateProgressSmoothly(1.0, duration: const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 100));
 
       if (response["matched"] == true) {
         final message = response["message"] ?? "";
@@ -174,6 +328,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         // Don't store in state - just show dialog
         setState(() {
           _processing = false;
+          _progress = 0.0;
         });
 
         // Show success dialog
@@ -196,6 +351,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         // Don't store in state - just show dialog
         setState(() {
           _processing = false;
+          _progress = 0.0;
         });
 
         // Show error dialog with captured image
@@ -210,6 +366,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
 
       setState(() {
         _processing = false;
+        _progress = 0.0;
       });
 
       // Show error dialog for camera errors too (without image)
@@ -218,7 +375,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         barrierDismissible: false,
         builder: (dialogContext) {
           // Auto-close after 3 seconds
-          Future.delayed(const Duration(seconds: 3), () {
+          Future.delayed(const Duration(seconds: 5), () {
             if (dialogContext.mounted) {
               Navigator.of(dialogContext).pop();
             }
@@ -264,8 +421,91 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     } finally {
       /// ✅ ALWAYS unlock button
       if (mounted) {
-        setState(() => _processing = false);
+        setState(() {
+          _processing = false;
+          _progress = 0.0;
+        });
       }
+    }
+  }
+
+  /// Smoothly animate progress from current value to target
+  void _updateProgressSmoothly(double target,
+      {required Duration duration}) async {
+    if (!mounted || !_processing) return;
+
+    final startProgress = _progress;
+    final steps = (duration.inMilliseconds / 16).round(); // ~60fps
+    final increment = (target - startProgress) / steps;
+
+    for (int i = 0; i <= steps; i++) {
+      if (!mounted || !_processing) break;
+
+      final newProgress = (startProgress + (increment * i)).clamp(0.0, target);
+      setState(() {
+        _progress = newProgress;
+      });
+
+      await Future.delayed(
+          Duration(milliseconds: duration.inMilliseconds ~/ steps));
+    }
+
+    // Ensure we reach exactly the target
+    if (mounted && _processing) {
+      setState(() {
+        _progress = target.clamp(0.0, 1.0);
+      });
+    }
+  }
+
+  /// Update progress gradually during API call
+  Future<dynamic> _updateProgressDuringApiCall(
+      double start, double end, Future<dynamic> apiCall) async {
+    if (!mounted || !_processing) {
+      return await apiCall;
+    }
+
+    // Set initial progress
+    setState(() {
+      _progress = start;
+    });
+
+    // Start a timer that gradually increases progress during API call
+    final progressTimer =
+        Timer.periodic(const Duration(milliseconds: 150), (timer) {
+      if (!mounted || !_processing) {
+        timer.cancel();
+        return;
+      }
+
+      // Gradually increase progress, but don't exceed end
+      setState(() {
+        if (_progress < end - 0.05) {
+          _progress = (_progress + 0.008).clamp(start, end - 0.05);
+        }
+      });
+    });
+
+    // Wait for API call to complete
+    try {
+      final result = await apiCall;
+      return result;
+    } finally {
+      progressTimer.cancel();
+      // Set to end value when API completes
+      if (mounted && _processing) {
+        setState(() {
+          _progress = end;
+        });
+      }
+    }
+  }
+
+  void _updateProgress(double value) {
+    if (mounted && _processing) {
+      setState(() {
+        _progress = value.clamp(0.0, 1.0);
+      });
     }
   }
 
@@ -298,7 +538,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       builder: (dialogContext) {
         // Auto-close after 3 seconds
-        Future.delayed(const Duration(seconds: 3), () {
+        Future.delayed(const Duration(seconds: 5), () {
           if (dialogContext.mounted) {
             Navigator.of(dialogContext).pop();
           }
@@ -407,7 +647,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       builder: (dialogContext) {
         // Auto-close after 3 seconds
-        Future.delayed(const Duration(seconds: 3), () {
+        Future.delayed(const Duration(seconds: 5), () {
           if (dialogContext.mounted) {
             Navigator.of(dialogContext).pop();
           }
@@ -611,9 +851,25 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                               ),
                             ),
                             child: _processing
-                                ? const CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ArcProgressIndicator(
+                                        progress: _progress,
+                                        color: Colors.white,
+                                        strokeWidth: 3.0,
+                                        size: 20.0,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        "${(_progress * 100).toInt()}%",
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
                                   )
                                 : const Text(
                                     "Capture Face",

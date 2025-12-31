@@ -292,17 +292,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // ───────────────── HEADER ─────────────────
 
   Widget _buildHeader() {
-    final now = DateTime.now();
-    final date = "${_weekday(now.weekday)}, ${now.day} ${_month(now.month)}";
-
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(date,
-              style: const TextStyle(
-                  color: textMuted, fontSize: 13, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 4),
           Text(_getGreeting(),
               style: const TextStyle(
                   color: Colors.white,
@@ -327,6 +320,15 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       return "Good Evening";
     }
+  }
+
+  String _getFormattedDate() {
+    final now = DateTime.now();
+    final weekday = _weekday(now.weekday);
+    final day = now.day;
+    final month = _month(now.month);
+    final year = now.year;
+    return "$weekday, $day $month $year";
   }
 
   // ───────────────── CLOCK CARD ─────────────────
@@ -360,8 +362,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 4),
-          const Text("Office Time Zone",
-              style: TextStyle(color: textMuted, fontSize: 12)),
+          Text(
+            _getFormattedDate(),
+            style: const TextStyle(color: textMuted, fontSize: 14),
+          ),
         ],
       ),
     );

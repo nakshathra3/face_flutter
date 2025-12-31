@@ -1027,8 +1027,8 @@ def recognize():
                 "full_name": employee_name,
                 "name": employee_name,
                 "date": today,
-                "clock_in": clock_in_time_only,  # Only time portion: "19:46:48"
-                "clock_in_time": clock_in_time_only,  # Only time portion
+                "clock_in": None,  # Only time portion: "19:46:48"
+                "clock_in_time": None,  # Only time portion
                 "clock_out": now,  # Already in HH:MM:SS format
                 "clock_out_time": now,  # Already in HH:MM:SS format
                 "hours_worked": round(hours_worked, 2) if hours_worked else None,

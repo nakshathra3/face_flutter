@@ -14,8 +14,8 @@ class ApiService {
   //static const String _baseUrl = "http://192.168.0.131:5000";
   // Updated IP addresses found: 192.168.56.1 (VirtualBox) or 192.168.29.91 (Main network)
   // For Android Emulator, change to: "http://10.0.2.2:5000"
-  static const String _baseUrl = "http://192.168.29.91:5000";
-  //static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
+  //static const String _baseUrl = "http://192.168.29.91:5000";
+  static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
   //static const String _baseUrl = "http://192.168.1.102:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
