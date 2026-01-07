@@ -13,6 +13,7 @@ from datetime import timedelta
 import threading
 import time
 import requests
+import pytz  # Indian Standard Time
 
 app = Flask(__name__)
 CORS(app)
@@ -25,7 +26,14 @@ DISTANCE_THRESHOLD = 0.7
 SIMILARITY_THRESHOLD = 0.7
 
 
-url = "https://workforce.dsignzmedia.com/api"
+url = "https://dev-workforce.dsignzmedia.com/api"
+
+# IST timezone constant
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_ist_now():
+    """Get current time in IST (Indian Standard Time)"""
+    return datetime.now(IST)
 
 def fetchAttendance():
     response = requests.get(url + "/active")
@@ -42,25 +50,28 @@ def fetchAttendance():
     else:
         return load_json(ATTENDANCE_FILE);
 
+
+
 def auto_clockout_active_sessions():
     """
     Auto clock-out active sessions that have been active for 90+ minutes.
     This runs in the background to automatically close forgotten sessions.
-    Auto clock-out executes ONLY after 10:00 PM (22:00) of the same day.
+    Auto clock-out executes ONLY after 11:50 PM (23:50) IST of the same day. 
     """
     try:
-        today = datetime.now().strftime("%Y-%m-%d")
-        now = datetime.now()
+        # Get current time in IST
+        ist_now = get_ist_now()
+        today = ist_now.strftime("%Y-%m-%d")
         AUTO_CLOCKOUT_MINUTES = 90
         
-        # 10 PM TIME GATE: Auto clock-out executes ONLY after 10:00 PM (22:00) of the same day
-        cutoff_time = datetime.strptime(f"{today} 22:00:00", "%Y-%m-%d %H:%M:%S")
-        if now < cutoff_time:
-            # Before 10 PM - skip auto clock-out
+        # 11:50 PM IST TIME GATE: Auto clock-out executes ONLY after 11:50 PM (23:50) IST of the same day
+        cutoff_time = IST.localize(datetime.strptime(f"{today} 23:50:00", "%Y-%m-%d %H:%M:%S"))
+        if ist_now < cutoff_time:
+            # Before 11:50 PM IST - skip auto clock-out
             return
         
-        # After 10 PM - proceed with auto clock-out logic
-        print(f"🕙 [AUTO CLOCK-OUT] Current time {now.strftime('%H:%M:%S')} is after 10:00 PM - checking for active sessions...")
+        # After 11:50 PM IST - proceed with auto clock-out logic
+        print(f"🕙 [AUTO CLOCK-OUT] Current IST time {ist_now.strftime('%H:%M:%S')} is after 11:50 PM IST - checking for active sessions...")
         sys.stdout.flush()
         
         # Fetch all attendance records from API
@@ -94,23 +105,24 @@ def auto_clockout_active_sessions():
                 
                 if clock_in_raw:
                     try:
-                        # Parse clock-in time
+                        # Parse clock-in time (assume it's in IST)
                         if " " in str(clock_in_raw):
                             clock_in_str = str(clock_in_raw)
                         else:
                             clock_in_str = f"{today} {clock_in_raw}"
                         
-                        clock_in_dt = datetime.strptime(clock_in_str, "%Y-%m-%d %H:%M:%S")
+                        # Parse as IST time
+                        clock_in_dt = IST.localize(datetime.strptime(clock_in_str, "%Y-%m-%d %H:%M:%S"))
                         
-                        # Calculate elapsed time
-                        elapsed_minutes = (now - clock_in_dt).total_seconds() / 60
+                        # Calculate elapsed time in IST
+                        elapsed_minutes = (ist_now - clock_in_dt).total_seconds() / 60
                         
                         # Auto clock-out if >= 90 minutes
                         if elapsed_minutes >= AUTO_CLOCKOUT_MINUTES:
                             user_id = record.get("uuid")
                             user_type = record.get("type") or ("intern" if (record.get("code") or "").startswith("INT") else "employee")
                             
-                            # Calculate auto clock-out time (clock_in + 90 minutes)
+                            # Calculate auto clock-out time (clock_in + 90 minutes) in IST
                             auto_clockout_dt = clock_in_dt + timedelta(minutes=AUTO_CLOCKOUT_MINUTES)
                             auto_clockout_time = auto_clockout_dt.strftime("%H:%M:%S")
                             
@@ -129,7 +141,7 @@ def auto_clockout_active_sessions():
                             
                             response = requests.post(url + "/attendance", json=clock_out_data)
                             if response.status_code in [200, 201]:
-                                print(f"✅ [AUTO CLOCK-OUT] Auto clocked out user {record.get('full_name') or record.get('name')} at {auto_clockout_time} (session was active for {elapsed_minutes:.1f} minutes)")
+                                print(f"✅ [AUTO CLOCK-OUT] Auto clocked out user {record.get('full_name') or record.get('name')} at {auto_clockout_time} IST (session was active for {elapsed_minutes:.1f} minutes)")
                             else:
                                 print(f"⚠️ [AUTO CLOCK-OUT] Failed to auto clock-out user {record.get('full_name') or record.get('name')}: {response.status_code}")
                     except Exception as e:
@@ -1167,7 +1179,7 @@ if __name__ == '__main__':
     start_auto_clockout_thread()
     
     app.run(
-        host="192.168.29.91",  # your machine’s IP
+        host="192.168.1.119",  # your machine’s IP
         port=5000,
         debug=True
     )

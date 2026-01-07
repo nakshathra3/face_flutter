@@ -73,7 +73,7 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
 
       // Fetch from production API's active endpoint which has employee data with face_embedding
       final response = await http
-          .get(Uri.parse("https://workforce.dsignzmedia.com/api/active"))
+          .get(Uri.parse("https://dev-workforce.dsignzmedia.com/api/active"))
           .timeout(
             const Duration(seconds: 10),
             onTimeout: () => throw Exception("Request timeout"),
