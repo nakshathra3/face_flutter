@@ -17,20 +17,22 @@ class ApiService {
   //static const String _baseUrl = "http://192.168.29.91:5000";
   //static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
   //static const String _baseUrl = "http://192.168.1.102:5000";
-  static const String _baseUrl = "http://192.168.1.119:5000";
+  static const String _baseUrl = "http://192.168.1.39:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
     String action,
   ) async {
     try {
+      final url = Uri.parse("$_baseUrl/recognize");
+
       final response = await http
           .post(
-        Uri.parse("$_baseUrl/recognize"),
+        url,
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "image": base64Image,
-          "action": action, // "in" or "out"
+          "action": action,
         }),
       )
           .timeout(
@@ -67,7 +69,8 @@ class ApiService {
   static Future<List<Attendance>> fetchAttendance() async {
     try {
       // Use the direct API route
-      const String apiUrl = "https://dev-workforce.dsignzmedia.com/api/attendance";
+      const String apiUrl =
+          "https://dev-workforce.dsignzmedia.com/api/attendance";
       print("🌐 [API] ========== FETCHING ATTENDANCE ==========");
       print("🌐 [API] Route: GET $apiUrl");
 

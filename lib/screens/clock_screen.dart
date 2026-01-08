@@ -538,7 +538,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       builder: (dialogContext) {
         // Auto-close after 3 seconds
-        Future.delayed(const Duration(seconds: 5), () {
+        Future.delayed(const Duration(seconds: 10), () {
           if (dialogContext.mounted) {
             Navigator.of(dialogContext).pop();
           }

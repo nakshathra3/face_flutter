@@ -52,122 +52,6 @@ def fetchAttendance():
 
 
 
-def auto_clockout_active_sessions():
-    """
-    Auto clock-out active sessions that have been active for 90+ minutes.
-    This runs in the background to automatically close forgotten sessions.
-    Auto clock-out executes ONLY after 11:50 PM (23:50) IST of the same day. 
-    """
-    try:
-        # Get current time in IST
-        ist_now = get_ist_now()
-        today = ist_now.strftime("%Y-%m-%d")
-        AUTO_CLOCKOUT_MINUTES = 90
-        
-        # 11:50 PM IST TIME GATE: Auto clock-out executes ONLY after 11:50 PM (23:50) IST of the same day
-        cutoff_time = IST.localize(datetime.strptime(f"{today} 23:50:00", "%Y-%m-%d %H:%M:%S"))
-        if ist_now < cutoff_time:
-            # Before 11:50 PM IST - skip auto clock-out
-            return
-        
-        # After 11:50 PM IST - proceed with auto clock-out logic
-        print(f"🕙 [AUTO CLOCK-OUT] Current IST time {ist_now.strftime('%H:%M:%S')} is after 11:50 PM IST - checking for active sessions...")
-        sys.stdout.flush()
-        
-        # Fetch all attendance records from API
-        try:
-            response = requests.get(url + "/attendance")
-            if response.status_code != 200:
-                return
-            
-            data = response.json()
-            attendance_records = []
-            if isinstance(data, dict) and "data" in data:
-                data_obj = data.get("data", {})
-                employees = data_obj.get("employees", [])
-                interns = data_obj.get("interns", [])
-                attendance_records = employees + interns
-            elif isinstance(data, list):
-                attendance_records = data
-            
-            # Find all active sessions (clock_in without clock_out) for today
-            for record in attendance_records:
-                if not isinstance(record, dict):
-                    continue
-                
-                record_date = record.get("date")
-                clock_in_raw = record.get("clock_in_time") or record.get("clock_in")
-                clock_out_raw = record.get("clock_out_time") or record.get("clock_out")
-           
-                # Skip if not today or already clocked out
-                if record_date != today or clock_out_raw:
-                    continue
-                
-                if clock_in_raw:
-                    try:
-                        # Parse clock-in time (assume it's in IST)
-                        if " " in str(clock_in_raw):
-                            clock_in_str = str(clock_in_raw)
-                        else:
-                            clock_in_str = f"{today} {clock_in_raw}"
-                        
-                        # Parse as IST time
-                        clock_in_dt = IST.localize(datetime.strptime(clock_in_str, "%Y-%m-%d %H:%M:%S"))
-                        
-                        # Calculate elapsed time in IST
-                        elapsed_minutes = (ist_now - clock_in_dt).total_seconds() / 60
-                        
-                        # Auto clock-out if >= 90 minutes
-                        if elapsed_minutes >= AUTO_CLOCKOUT_MINUTES:
-                            user_id = record.get("uuid")
-                            user_type = record.get("type") or ("intern" if (record.get("code") or "").startswith("INT") else "employee")
-                            
-                            # Calculate auto clock-out time (clock_in + 90 minutes) in IST
-                            auto_clockout_dt = clock_in_dt + timedelta(minutes=AUTO_CLOCKOUT_MINUTES)
-                            auto_clockout_time = auto_clockout_dt.strftime("%H:%M:%S")
-                            
-                            # Calculate hours worked (90 minutes = 1.5 hours)
-                            hours_worked = AUTO_CLOCKOUT_MINUTES / 60.0
-                            
-                            # Send auto clock-out to API
-                            clock_out_data = {
-                                "user_id": user_id,
-                                "date": today,
-                                "clock_out": auto_clockout_time,
-                                "hours_worked": round(hours_worked, 2),
-                                "user_type": user_type,
-                                "auto_clockout": True  # Flag to indicate auto clock-out
-                            }
-                            
-                            response = requests.post(url + "/attendance", json=clock_out_data)
-                            if response.status_code in [200, 201]:
-                                print(f"✅ [AUTO CLOCK-OUT] Auto clocked out user {record.get('full_name') or record.get('name')} at {auto_clockout_time} IST (session was active for {elapsed_minutes:.1f} minutes)")
-                            else:
-                                print(f"⚠️ [AUTO CLOCK-OUT] Failed to auto clock-out user {record.get('full_name') or record.get('name')}: {response.status_code}")
-                    except Exception as e:
-                        print(f"❌ [AUTO CLOCK-OUT] Error processing record: {e}")
-                        continue
-        except Exception as e:
-            print(f"❌ [AUTO CLOCK-OUT] Error fetching attendance: {e}")
-    except Exception as e:
-        print(f"❌ [AUTO CLOCK-OUT] Critical error: {e}")
-
-def start_auto_clockout_thread():
-    """Start background thread to periodically check and auto clock-out active sessions"""
-    def run_auto_clockout():
-        while True:
-            try:
-                auto_clockout_active_sessions()
-                # Check every 5 minutes
-                time.sleep(300)
-            except Exception as e:
-                print(f"❌ [AUTO CLOCK-OUT THREAD] Error: {e}")
-                time.sleep(60)  # Wait 1 minute before retrying on error
-    
-    thread = threading.Thread(target=run_auto_clockout, daemon=True)
-    thread.start()
-    print("✅ [AUTO CLOCK-OUT] Background thread started (checks every 5 minutes)")
-    sys.stdout.flush()
 
 def ensure_file(path, default):
     if not os.path.exists(path):
@@ -700,6 +584,11 @@ def enroll():
 
 @app.route("/recognize", methods=["POST"])
 def recognize():
+    print("\n" + "="*60)
+    print("🚀 [RECOGNIZE] /recognize endpoint called!")
+    print("="*60)
+    sys.stdout.flush()
+
     try:
         # --------------------
         # 1️⃣ Get incoming JSON
@@ -778,7 +667,7 @@ def recognize():
         if len(employees) == 0:
             print('❌ [RECOGNITION LOG] employees is zero')
             print("="*60 + "\n")
-            return ggjsonify({
+            return jsonify({
                 "matched": False,
                 "message": "No employees enrolled yet"
             }), 400
@@ -1176,10 +1065,9 @@ if __name__ == '__main__':
     sys.stdout.flush()
     
     # Start background thread for auto clock-out
-    start_auto_clockout_thread()
-    
+   
     app.run(
-        host="192.168.1.119",  # your machine’s IP
+        host="192.168.1.39",  # your machine’s IP
         port=5000,
         debug=True
     )
