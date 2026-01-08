@@ -207,14 +207,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       if (record.clock_in.isNotEmpty && record.clock_in != "null") {
-        final clockInStr = "$dateStr ${record.clock_in}";
+        String clockInStr = record.clock_in;
+
+        // Check if clock_in already contains full date-time (e.g., "2026-01-08 13:22")
+        if (!clockInStr.contains(dateStr)) {
+          // If not, prepend the date
+          clockInStr = "$dateStr $clockInStr";
+        }
+
         clockInTime = _parseDateTime(clockInStr);
       }
 
       if (record.clock_out.isNotEmpty &&
           record.clock_out != "null" &&
           record.clock_out.trim().isNotEmpty) {
-        final clockOutStr = "$dateStr ${record.clock_out}";
+        String clockOutStr = record.clock_out;
+
+        // Check if clock_out already contains full date-time
+        if (!clockOutStr.contains(dateStr)) {
+          // If not, prepend the date
+          clockOutStr = "$dateStr $clockOutStr";
+        }
+
         clockOutTime = _parseDateTime(clockOutStr);
       }
     } catch (e) {
