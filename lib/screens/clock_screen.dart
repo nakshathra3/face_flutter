@@ -298,11 +298,133 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       final base64Image = base64Encode(bytes);
 
       // Step 3: Sending to API (50-90%)
-      // Start API call and update progress gradually during the call
-      final apiCall = ApiService.recognizeFace(base64Image, _activeTab);
+      // For clock-out, first check hours with preview (confirm=false)
+      // For clock-in, proceed normally
+      Map<String, dynamic> response;
 
-      // Update progress gradually during API call (50% to 90%)
-      final response = await _updateProgressDuringApiCall(0.50, 0.90, apiCall);
+      if (_activeTab == "out") {
+        // First, get preview (hours calculation without saving)
+        _updateProgressSmoothly(0.60,
+            duration: const Duration(milliseconds: 200));
+        final previewCall =
+            ApiService.recognizeFace(base64Image, _activeTab, confirm: false);
+        final previewResponse =
+            await _updateProgressDuringApiCall(0.60, 0.75, previewCall);
+
+        if (!mounted) return;
+
+        if (previewResponse["matched"] == true) {
+          final previewRecord = previewResponse["record"];
+          final hoursWorked = previewRecord != null
+              ? (previewRecord["hours_worked"] as num?)?.toDouble()
+              : null;
+
+          // If hours < 5, show confirmation before saving
+          if (hoursWorked != null && hoursWorked < 5.0) {
+            final employee = previewResponse["employee"];
+            final emotion = previewResponse["emotion"] ?? "neutral";
+            final imageBase64 = previewResponse["image"];
+
+            final employeeName = employee != null
+                ? (employee["full_name"] ?? employee["name"] ?? "")
+                : "";
+
+            final now = DateTime.now();
+            final clockTime = DateFormat('hh:mm:ss a').format(now);
+
+            setState(() {
+              _processing = false;
+              _progress = 0.0;
+            });
+
+            // Show confirmation dialog
+            _showClockOutConfirmationDialog(
+              imageBase64: imageBase64 ?? "",
+              employeeName: employeeName,
+              emotion: emotion,
+              hoursWorked: hoursWorked,
+              clockTime: clockTime,
+              onConfirm: () async {
+                // User confirmed, now actually save the clock-out
+                setState(() {
+                  _processing = true;
+                  _progress = 0.75;
+                });
+
+                // Send actual clock-out request with confirm=true
+                final confirmCall = ApiService.recognizeFace(
+                    base64Image, _activeTab,
+                    confirm: true);
+                final confirmResponse =
+                    await _updateProgressDuringApiCall(0.75, 0.95, confirmCall);
+
+                if (!mounted) return;
+
+                _updateProgressSmoothly(1.0,
+                    duration: const Duration(milliseconds: 200));
+                await Future.delayed(const Duration(milliseconds: 100));
+
+                if (confirmResponse["matched"] == true) {
+                  final confirmEmployee = confirmResponse["employee"];
+                  final confirmEmotion =
+                      confirmResponse["emotion"] ?? "neutral";
+                  final confirmImageBase64 = confirmResponse["image"];
+
+                  final confirmEmployeeName = confirmEmployee != null
+                      ? (confirmEmployee["full_name"] ??
+                          confirmEmployee["name"] ??
+                          "")
+                      : "";
+
+                  setState(() {
+                    _processing = false;
+                    _progress = 0.0;
+                  });
+
+                  // Show success dialog
+                  _showClockSuccessDialog(
+                    imageBase64: confirmImageBase64 ?? "",
+                    employeeName: confirmEmployeeName,
+                    emotion: confirmEmotion,
+                    message: "Successfully Clocked Out",
+                    clockTime: clockTime,
+                  );
+                } else {
+                  setState(() {
+                    _processing = false;
+                    _progress = 0.0;
+                  });
+
+                  _showClockErrorDialog(
+                    imageBase64: base64Image,
+                    message:
+                        confirmResponse["message"] ?? "Failed to clock out",
+                  );
+                }
+              },
+              onCancel: () {
+                // User cancelled - clock-out was NOT saved
+                // No need to do anything, just return to normal state
+              },
+            );
+
+            return; // Exit early, don't proceed with normal flow
+          }
+        }
+
+        // If hours >= 5 or preview failed, proceed with normal clock-out (confirm=true)
+        _updateProgressSmoothly(0.75,
+            duration: const Duration(milliseconds: 200));
+      }
+
+      // Normal flow: clock-in or clock-out with hours >= 5
+      final apiCall =
+          ApiService.recognizeFace(base64Image, _activeTab, confirm: true);
+      final apiProgressStart = _activeTab == "out" ? 0.75 : 0.50;
+
+      // Update progress gradually during API call
+      response =
+          await _updateProgressDuringApiCall(apiProgressStart, 0.90, apiCall);
 
       if (!mounted) return;
 
@@ -315,7 +437,6 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         final employee = response["employee"];
         final emotion = response["emotion"] ?? "neutral";
         final imageBase64 = response["image"];
-        final record = response["record"];
 
         final employeeName = employee != null
             ? (employee["full_name"] ?? employee["name"] ?? "")
@@ -627,6 +748,125 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               ),
               child: Text(
                 "OK",
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showClockOutConfirmationDialog({
+    required String imageBase64,
+    required String employeeName,
+    required String emotion,
+    required double hoursWorked,
+    required String clockTime,
+    required VoidCallback onConfirm,
+    required VoidCallback onCancel,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1A1A),
+          title: Text(
+            "Confirm Clock Out",
+            style: GoogleFonts.inter(
+              color: Colors.orange,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..scale(-1.0, 1.0), // Flip horizontally
+                  child: Image.memory(
+                    base64Decode(imageBase64),
+                    width: 150,
+                    height: 150,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "You've only worked ${hoursWorked.toStringAsFixed(2)} hours today.",
+                style: GoogleFonts.inter(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Minimum working time is 5 hours.\n\nAre you sure you want to clock out?",
+                style: GoogleFonts.inter(
+                  color: Colors.grey,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (employeeName.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  employeeName,
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              const SizedBox(height: 8),
+              Text(
+                clockTime,
+                style: GoogleFonts.inter(
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            // Cancel button
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                onCancel();
+              },
+              child: Text(
+                "Cancel",
+                style: GoogleFonts.inter(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            // Confirm button
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                onConfirm();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                "Yes, Clock Out",
                 style: GoogleFonts.inter(
                   fontWeight: FontWeight.w600,
                 ),

@@ -603,8 +603,11 @@ def recognize():
 
         action = data["action"]
         img_data = data["image"]
+        confirm = data.get("confirm", True)  # Default to True for backward compatibility
 
         print("📦 Incoming image type:", type(img_data))
+        print(f"📦 Action: {action}, Confirm: {confirm}")
+        sys.stdout.flush()
 
         # --------------------
         # 2️⃣ Convert Base64 → CV2
@@ -920,88 +923,111 @@ def recognize():
                 clock_in_time_only = None
                 hours_worked = None
 
-            # Prepare COMPLETE clock-out data for API
-            # IMPORTANT: Send only time portion (HH:MM:SS), not full datetime
-            clock_out_data = {
-                "user_id": user_id,
-                "uuid": user_id,
-                "full_name": employee_name,
-                "name": employee_name,
-                "date": today,
-                "clock_in": None,  # Only time portion: "19:46:48"
-                "clock_in_time": None,  # Only time portion
-                "clock_out": now,  # Already in HH:MM:SS format
-                "clock_out_time": now,  # Already in HH:MM:SS format
-                "hours_worked": round(hours_worked, 2) if hours_worked else None,
-                "user_type": user_type,
-                "code": best_match.get("code") or best_match.get("employee_id"),
-                "type": user_type,
-                "session_id": session_id,  # Include session_id to identify the session to update
-                "is_new_session": False  # Flag to indicate this is an update, not a new record.
-            }
-            
-            # Send clock-out to API
-            try:
-                print(f"\n💾 [ATTENDANCE LOG] Sending clock-out to API (closing active session)...")
-                print(f"📦 [ATTENDANCE LOG] Clock-out data: {clock_out_data}")
+            # If confirm is False, just return preview (hours calculation) without saving
+            if not confirm:
+                print(f"📊 [PREVIEW MODE] Clock-out preview - hours: {hours_worked:.2f} (NOT SAVING)")
                 sys.stdout.flush()
                 
-                response = requests.post(url + "/attendance", json=clock_out_data)
-                print(f"🌐 [ATTENDANCE LOG] API Response status: {response.status_code}")
-                print(f"🌐 [ATTENDANCE LOG] API Response text: {response.text[:200]}")
-                sys.stdout.flush()
-                
-                if response.status_code not in [200, 201]:
-                    print(f"⚠️ [ATTENDANCE LOG] WARNING: API returned status {response.status_code}")
-                    return jsonify({
-                        "matched": False,
-                        "message": f"Failed to save clock-out: {response.status_code}"
-                    }), 500
-
-                # Calculate cumulative hours worked for all sessions today
-                total_hours = 0.0
-                session_hours = []
-                for record in all_today_records:
-                    clock_out = record.get("clock_out_time") or record.get("clock_out")
-                    hours = record.get("hours_worked")
-                    if clock_out and hours:
-                        total_hours += float(hours)
-                        session_hours.append(float(hours))
-                
-                # Add current session hours
-                if hours_worked:
-                    total_hours += hours_worked
-                    session_hours.append(hours_worked)
-                
-                print(f"📊 [CUMULATIVE HOURS] Total hours worked today: {total_hours:.2f} hrs (sessions: {[f'{h:.2f}' for h in session_hours]})")
-                sys.stdout.flush()
-
-                # Prepare record for response (complete record with both times)
+                # Return preview response with hours but no save
                 record = {
                     "user_id": user_id,
                     "uuid": user_id,
                     "full_name": employee_name,
                     "name": employee_name,
                     "date": today,
-                    "clock_in": clock_in_time_only,  # Only time portion
-                    "clock_in_time": clock_in_time_only,  # Only time portion
+                    "clock_in": clock_in_time_only,
+                    "clock_in_time": clock_in_time_only,
+                    "clock_out": now,
+                    "clock_out_time": now,
+                    "hours_worked": round(hours_worked, 2) if hours_worked else None,
+                    "user_type": user_type,
+                    "type": user_type,
+                    "code": best_match.get("code") or best_match.get("employee_id"),
+                    "preview": True  # Flag to indicate this is a preview
+                }
+            else:
+                # Prepare COMPLETE clock-out data for API
+                # IMPORTANT: Send only time portion (HH:MM:SS), not full datetime
+                clock_out_data = {
+                    "user_id": user_id,
+                    "uuid": user_id,
+                    "full_name": employee_name,
+                    "name": employee_name,
+                    "date": today,
+                    "clock_in": None,  # Only time portion: "19:46:48"
+                    "clock_in_time": None,  # Only time portion
                     "clock_out": now,  # Already in HH:MM:SS format
                     "clock_out_time": now,  # Already in HH:MM:SS format
                     "hours_worked": round(hours_worked, 2) if hours_worked else None,
-                    "total_hours_today": round(total_hours, 2),
                     "user_type": user_type,
+                    "code": best_match.get("code") or best_match.get("employee_id"),
                     "type": user_type,
-                    "code": best_match.get("code") or best_match.get("employee_id")
+                    "session_id": session_id,  # Include session_id to identify the session to update
+                    "is_new_session": False  # Flag to indicate this is an update, not a new record.
                 }
-            except Exception as e:
-                print(f"❌ [ATTENDANCE LOG] Error sending clock-out to API: {e}")
-                import traceback
-                traceback.print_exc()
-                sys.stdout.flush()
-                return jsonify({
-                    "matched": False,
-                    "message": f"Failed to save clock-out: {str(e)}"
-                }), 500
+                
+                # Send clock-out to API
+                try:
+                    print(f"\n💾 [ATTENDANCE LOG] Sending clock-out to API (closing active session)...")
+                    print(f"📦 [ATTENDANCE LOG] Clock-out data: {clock_out_data}")
+                    sys.stdout.flush()
+                    
+                    response = requests.post(url + "/attendance", json=clock_out_data)
+                    print(f"🌐 [ATTENDANCE LOG] API Response status: {response.status_code}")
+                    print(f"🌐 [ATTENDANCE LOG] API Response text: {response.text[:200]}")
+                    sys.stdout.flush()
+                    
+                    if response.status_code not in [200, 201]:
+                        print(f"⚠️ [ATTENDANCE LOG] WARNING: API returned status {response.status_code}")
+                        return jsonify({
+                            "matched": False,
+                            "message": f"Failed to save clock-out: {response.status_code}"
+                        }), 500
+
+                    # Calculate cumulative hours worked for all sessions today
+                    total_hours = 0.0
+                    session_hours = []
+                    for record in all_today_records:
+                        clock_out = record.get("clock_out_time") or record.get("clock_out")
+                        hours = record.get("hours_worked")
+                        if clock_out and hours:
+                            total_hours += float(hours)
+                            session_hours.append(float(hours))
+                    
+                    # Add current session hours
+                    if hours_worked:
+                        total_hours += hours_worked
+                        session_hours.append(hours_worked)
+                    
+                    print(f"📊 [CUMULATIVE HOURS] Total hours worked today: {total_hours:.2f} hrs (sessions: {[f'{h:.2f}' for h in session_hours]})")
+                    sys.stdout.flush()
+
+                    # Prepare record for response (complete record with both times)
+                    record = {
+                        "user_id": user_id,
+                        "uuid": user_id,
+                        "full_name": employee_name,
+                        "name": employee_name,
+                        "date": today,
+                        "clock_in": clock_in_time_only,  # Only time portion
+                        "clock_in_time": clock_in_time_only,  # Only time portion
+                        "clock_out": now,  # Already in HH:MM:SS format
+                        "clock_out_time": now,  # Already in HH:MM:SS format
+                        "hours_worked": round(hours_worked, 2) if hours_worked else None,
+                        "total_hours_today": round(total_hours, 2),
+                        "user_type": user_type,
+                        "type": user_type,
+                        "code": best_match.get("code") or best_match.get("employee_id")
+                    }
+                except Exception as e:
+                    print(f"❌ [ATTENDANCE LOG] Error sending clock-out to API: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    sys.stdout.flush()
+                    return jsonify({
+                        "matched": False,
+                        "message": f"Failed to save clock-out: {str(e)}"
+                    }), 500
 
         else:
             print('matched: false')

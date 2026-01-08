@@ -21,8 +21,9 @@ class ApiService {
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
-    String action,
-  ) async {
+    String action, {
+    bool confirm = true,
+  }) async {
     try {
       final url = Uri.parse("$_baseUrl/recognize");
 
@@ -33,6 +34,7 @@ class ApiService {
         body: jsonEncode({
           "image": base64Image,
           "action": action,
+          "confirm": confirm,
         }),
       )
           .timeout(
