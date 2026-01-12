@@ -10,11 +10,15 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   List<dynamic> _records = [];
   bool _loading = true;
   DateTime _currentTime = DateTime.now(); // Add current time state
   Timer? _timer; // Add timer for live updates
+  String _thoughtDescription = "Success is the sum of small efforts repeated day in and day out.";
+  String _thoughtName = "";
+  late AnimationController _bellAnimationController;
+  late Animation<double> _bellAnimation;
 
   static const bgBase = Color(0xFF000000);
   static const bgSurface = Color(0xFF1C1A1A);
@@ -26,23 +30,38 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadAttendance();
+    _loadNoticeboard();
     // Start timer to update clock every second
     _startClockTimer();
+    // Initialize bell animation - pendulum swing like a real bell
+    _bellAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    )..repeat(reverse: true);
+    _bellAnimation = Tween<double>(begin: -0.3, end: 0.3).animate(
+      CurvedAnimation(
+        parent: _bellAnimationController,
+        curve: Curves.easeInOutSine, // Smooth pendulum motion
+      ),
+    );
   }
 
   @override
   void dispose() {
     _timer?.cancel(); // Cancel timer when widget is disposed
+    _bellAnimationController.dispose(); // Dispose bell animation controller
     super.dispose();
   }
 
-  // Start timer to update clock every second
+  // Start timer to update clock every second and refresh notification card
   void _startClockTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {
           _currentTime = DateTime.now();
         });
+        // Refresh notification card every second
+        _loadNoticeboard();
       }
     });
   }
@@ -197,6 +216,24 @@ class _HomeScreenState extends State<HomeScreen> {
       print("❌ [HOME] Error loading attendance: $e");
       print("❌ [HOME] Stack trace: $stackTrace");
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadNoticeboard() async {
+    try {
+      print("🔍 [HOME] Fetching noticeboard data...");
+      final data = await ApiService.fetchNoticeboard();
+      if (data != null) {
+        setState(() {
+          _thoughtDescription = data['description'] ?? _thoughtDescription;
+          _thoughtName = data['name'] ?? "";
+        });
+        print("✅ [HOME] Noticeboard loaded: ${data['description']} by ${data['name']}");
+      } else {
+        print("⚠️ [HOME] No noticeboard data received");
+      }
+    } catch (e) {
+      print("❌ [HOME] Error loading noticeboard: $e");
     }
   }
 
@@ -388,27 +425,60 @@ class _HomeScreenState extends State<HomeScreen> {
   // ───────────────── THOUGHT CARD ─────────────────
 
   Widget _buildThoughtCard() {
-    return _glassCard(
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: bgSurface.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: primary,
+          width: 2,
+        ),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))
+        ],
+      ),
       child: Column(
-        children: const [
+        children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.auto_awesome, color: primary, size: 18),
-              SizedBox(width: 6),
-              Text("THOUGHT OF THE DAY",
+              AnimatedBuilder(
+                animation: _bellAnimation,
+                builder: (context, child) {
+                  return Transform.rotate(
+                    angle: _bellAnimation.value,
+                    alignment: Alignment.topCenter, // Rotate from top like a hanging bell
+                    child: const Icon(Icons.notifications, color: primary, size: 18),
+                  );
+                },
+              ),
+              const SizedBox(width: 6),
+              const Text("NOTIFICATION",
                   style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 14,
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
             ],
           ),
-          SizedBox(height: 10),
+          const SizedBox(height: 10),
           Text(
-            "Success is the sum of small efforts repeated day in and day out.",
+            _thoughtDescription,
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white, fontSize: 14),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
           ),
+          if (_thoughtName.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              "— $_thoughtName",
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: textMuted,
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
         ],
       ),
     );

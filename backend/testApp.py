@@ -169,13 +169,13 @@ def get_embedding(img):
         sys.stdout.flush()
         # Suppress stderr during DeepFace operations to hide lz4 cleanup errors
         with suppress_stderr():
-            reps = DeepFace.represent(
-                img_path=img,
-                model_name="Facenet",
-                detector_backend="mtcnn",
-                enforce_detection=True,
-                normalization="base"
-            )
+        reps = DeepFace.represent(
+            img_path=img,
+            model_name="Facenet",
+            detector_backend="mtcnn",
+            enforce_detection=True,
+            normalization="base"
+        )
         embedding = np.array(reps[0]["embedding"])
         print(f"✅ [DEEPFACE LOG] DeepFace.represent() SUCCESS!")
         print(f"📊 [DEEPFACE LOG] Embedding created: TRUE")
@@ -214,12 +214,12 @@ def get_emotion(img):
         # Pre-cropping can help but is optional since analyze() handles it.
         # Suppress stderr during DeepFace operations to hide lz4 cleanup errors
         with suppress_stderr():
-            result = DeepFace.analyze(
-                img_path=img,
-                actions=['emotion'],
+        result = DeepFace.analyze(
+            img_path=img,
+            actions=['emotion'],
                 enforce_detection=False,
                 detector_backend="retinaface"  # More accurate than opencv
-            )
+        )
         
         if isinstance(result, list):
             result = result[0]
