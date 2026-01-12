@@ -17,7 +17,7 @@ class ApiService {
   //static const String _baseUrl = "http://192.168.29.91:5000";
   //static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
   //static const String _baseUrl = "http://192.168.1.102:5000";
-  static const String _baseUrl = "http://192.168.1.39:5000";
+  static const String _baseUrl = "http://192.168.29.216:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
@@ -88,8 +88,19 @@ class ApiService {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         print("📊 [API] Response type: ${decoded.runtimeType}");
+        print("📊 [API] Response preview: ${response.body.length > 200 ? response.body.substring(0, 200) + '...' : response.body}");
 
-        // Check if response has status field
+        // Handle List response first (most common - backend returns direct list)
+        if (decoded is List) {
+          print("📊 [API] ✅ Response is a List with ${decoded.length} records");
+          if (decoded.isNotEmpty) {
+            print("📊 [API] First record keys: ${(decoded[0] as Map).keys}");
+            print("📊 [API] First record: ${decoded[0]}");
+          }
+          return decoded.map((json) => Attendance.fromJson(json)).toList();
+        }
+
+        // Check if response has status field (remote API format)
         if (decoded is Map && decoded['status'] == true) {
           print("✅ [API] API returned success status");
 
@@ -141,16 +152,6 @@ class ApiService {
           return [];
         }
 
-        // Fallback: Handle if response doesn't have status field
-        // Handle List response (direct array of attendance records)
-        if (decoded is List) {
-          print("📊 [API] ✅ Response is a List with ${decoded.length} records");
-          if (decoded.isNotEmpty) {
-            print("📊 [API] First record: ${decoded[0]}");
-          }
-          return decoded.map((json) => Attendance.fromJson(json)).toList();
-        }
-
         // Handle Map with 'records' key
         if (decoded is Map && decoded['records'] is List) {
           final recordsList = decoded['records'] as List;
@@ -185,6 +186,17 @@ class ApiService {
     } catch (e, stackTrace) {
       print("❌ [API] Error fetching attendance: $e");
       print("❌ [API] Stack trace: $stackTrace");
+      
+      // Provide helpful error message
+      String errorMsg = e.toString();
+      if (errorMsg.contains("Failed host lookup") || 
+          errorMsg.contains("Connection refused") ||
+          errorMsg.contains("SocketException")) {
+        print("⚠️ [API] Cannot connect to backend. Is it running at $_baseUrl?");
+      } else if (errorMsg.contains("timeout")) {
+        print("⚠️ [API] Request timed out. Backend may be slow or not responding.");
+      }
+      
       return [];
     }
   }
