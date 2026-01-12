@@ -289,4 +289,137 @@ class ApiService {
       return {"success": false, "message": errorMessage};
     }
   }
+
+  static Future<Map<String, dynamic>?> fetchNoticeboard() async {
+    try {
+      const String apiUrl = "https://dev-workforce.dsignzmedia.com/api/noticeboard";
+      print("🌐 [API] ========== FETCHING NOTICEBOARD ==========");
+      print("🌐 [API] Route: GET $apiUrl");
+
+      final response = await http.get(Uri.parse(apiUrl)).timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw Exception("Request timeout"),
+          );
+
+      print("🌐 [API] Response status: ${response.statusCode}");
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        print("📊 [API] Noticeboard response: $decoded");
+
+        // Handle different response structures
+        if (decoded is Map) {
+          // Check if response has status field
+          if (decoded['status'] == true && decoded['data'] != null) {
+            final data = decoded['data'];
+            if (data is Map) {
+              // Check if data has 'notices' array (actual API structure)
+              if (data['notices'] != null && data['notices'] is List) {
+                final notices = data['notices'] as List;
+                if (notices.isNotEmpty) {
+                  // Sort notices by created_at timestamp (most recent first)
+                  final sortedNotices = List<Map>.from(notices);
+                  sortedNotices.sort((a, b) {
+                    try {
+                      final dateA = a['created_at']?.toString() ?? "";
+                      final dateB = b['created_at']?.toString() ?? "";
+                      // Parse dates and compare (most recent first = descending order)
+                      if (dateA.isNotEmpty && dateB.isNotEmpty) {
+                        final parsedA = DateTime.tryParse(dateA.replaceAll(" ", "T"));
+                        final parsedB = DateTime.tryParse(dateB.replaceAll(" ", "T"));
+                        if (parsedA != null && parsedB != null) {
+                          return parsedB.compareTo(parsedA); // Descending order
+                        }
+                      }
+                      // Fallback: string comparison
+                      return dateB.compareTo(dateA);
+                    } catch (e) {
+                      print("⚠️ [API] Error sorting notices: $e");
+                      return 0;
+                    }
+                  });
+                  
+                  // Get the most recent notice (first after sorting)
+                  final mostRecentNotice = sortedNotices[0];
+                  // Extract description directly from notice
+                  final description = (mostRecentNotice['description'] ?? "").toString().trim();
+                  // Extract name from created_by object
+                  String name = "";
+                  if (mostRecentNotice['created_by'] != null && mostRecentNotice['created_by'] is Map) {
+                    final createdBy = mostRecentNotice['created_by'] as Map;
+                    name = (createdBy['name'] ?? "").toString().trim();
+                  }
+                  print("📊 [API] Most recent notice - description: '$description', name: '$name', created_at: ${mostRecentNotice['created_at']}");
+                  return {
+                    "description": description,
+                    "name": name,
+                  };
+                }
+              }
+              // Fallback: try direct fields in data
+              return {
+                "description": (data['description'] ?? "").toString().trim(),
+                "name": (data['name'] ?? "").toString().trim(),
+              };
+            } else if (data is List && data.isNotEmpty) {
+              // If data is a list, take the first item
+              final firstItem = data[0] as Map;
+              String name = "";
+              if (firstItem['created_by'] != null && firstItem['created_by'] is Map) {
+                final createdBy = firstItem['created_by'] as Map;
+                name = (createdBy['name'] ?? "").toString().trim();
+              } else {
+                name = (firstItem['name'] ?? "").toString().trim();
+              }
+              return {
+                "description": (firstItem['description'] ?? "").toString().trim(),
+                "name": name,
+              };
+            }
+          } else if (decoded['description'] != null || decoded['name'] != null) {
+            // Direct response with description/name
+            return {
+              "description": (decoded['description'] ?? "").toString().trim(),
+              "name": (decoded['name'] ?? "").toString().trim(),
+            };
+          }
+        } else if (decoded is List && decoded.isNotEmpty) {
+          // If response is directly a list
+          final firstItem = decoded[0] as Map;
+          String name = "";
+          if (firstItem['created_by'] != null && firstItem['created_by'] is Map) {
+            final createdBy = firstItem['created_by'] as Map;
+            name = (createdBy['name'] ?? "").toString().trim();
+          } else {
+            name = (firstItem['name'] ?? "").toString().trim();
+          }
+          return {
+            "description": (firstItem['description'] ?? "").toString().trim(),
+            "name": name,
+          };
+        }
+
+        print("⚠️ [API] Unknown noticeboard response structure");
+        return null;
+      } else {
+        print("❌ [API] Noticeboard request failed with status: ${response.statusCode}");
+        print("❌ [API] Response body: ${response.body}");
+        return null;
+      }
+    } catch (e, stackTrace) {
+      print("❌ [API] Error fetching noticeboard: $e");
+      print("❌ [API] Stack trace: $stackTrace");
+      
+      String errorMsg = e.toString();
+      if (errorMsg.contains("Failed host lookup") || 
+          errorMsg.contains("Connection refused") ||
+          errorMsg.contains("SocketException")) {
+        print("⚠️ [API] Cannot connect to noticeboard API.");
+      } else if (errorMsg.contains("timeout")) {
+        print("⚠️ [API] Request timed out.");
+      }
+      
+      return null;
+    }
+  }
 }
