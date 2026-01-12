@@ -23,7 +23,7 @@ ATTENDANCE_FILE = "attendance.json"
 
 MODEL_NAME = "Facenet"
 DISTANCE_THRESHOLD = 0.7
-SIMILARITY_THRESHOLD = 0.7
+SIMILARITY_THRESHOLD = 0.73
 
 
 url = "https://dev-workforce.dsignzmedia.com/api"
@@ -1093,7 +1093,7 @@ if __name__ == '__main__':
     # Start background thread for auto clock-out
    
     app.run(
-        host="192.168.1.39",  # your machine’s IP
+        host="192.168.29.216",  # your machine’s IP
         port=5000,
         debug=True
     )

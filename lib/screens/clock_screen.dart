@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:intl/intl.dart';
@@ -494,6 +495,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       showDialog(
         context: context,
         barrierDismissible: false,
+        barrierColor: Colors.black.withOpacity(0.5),
         builder: (dialogContext) {
           // Auto-close after 3 seconds
           Future.delayed(const Duration(seconds: 5), () {
@@ -502,8 +504,17 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             }
           });
 
-          return AlertDialog(
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: AlertDialog(
             backgroundColor: const Color(0xFF1C1A1A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(
+                color: Color(0xFF72BF45),
+                width: 2,
+              ),
+            ),
             title: Text(
               "Error",
               style: GoogleFonts.inter(
@@ -536,6 +547,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                 ),
               ),
             ],
+            ),
           );
         },
       );
@@ -657,16 +669,26 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     showDialog(
       context: context,
       barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.5),
       builder: (dialogContext) {
         // Auto-close after 3 seconds
-        Future.delayed(const Duration(seconds: 10), () {
+        Future.delayed(const Duration(seconds: 30), () {
           if (dialogContext.mounted) {
             Navigator.of(dialogContext).pop();
           }
         });
 
-        return AlertDialog(
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: AlertDialog(
           backgroundColor: const Color(0xFF1C1A1A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(
+              color: Color(0xFF72BF45),
+              width: 2,
+            ),
+          ),
           title: Text(
             isWarning ? "Notice" : "Success",
             style: GoogleFonts.inter(
@@ -736,7 +758,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                 ),
               ],
             ],
-          ),
+            ),
           actions: [
             ElevatedButton(
               onPressed: () {
@@ -754,6 +776,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               ),
             ),
           ],
+          ),
         );
       },
     );
@@ -771,9 +794,19 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     showDialog(
       context: context,
       barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.5),
       builder: (dialogContext) {
-        return AlertDialog(
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: AlertDialog(
           backgroundColor: const Color(0xFF1C1A1A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(
+              color: Colors.orange,
+              width: 2,
+            ),
+          ),
           title: Text(
             "Confirm Clock Out",
             style: GoogleFonts.inter(
@@ -873,6 +906,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               ),
             ),
           ],
+          ),
         );
       },
     );
@@ -885,6 +919,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     showDialog(
       context: context,
       barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.5),
       builder: (dialogContext) {
         // Auto-close after 3 seconds
         Future.delayed(const Duration(seconds: 5), () {
@@ -893,8 +928,17 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           }
         });
 
-        return AlertDialog(
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: AlertDialog(
           backgroundColor: const Color(0xFF1C1A1A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(
+              color: Colors.redAccent,
+              width: 2,
+            ),
+          ),
           title: Text(
             "Face Not Identified",
             style: GoogleFonts.inter(
@@ -957,6 +1001,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               ),
             ),
           ],
+          ),
         );
       },
     );
