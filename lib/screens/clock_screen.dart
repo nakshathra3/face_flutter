@@ -248,6 +248,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
 
+      if (_controller == null) {
+        _isInitializing = false;
+        return;
+      }
       await _controller!.initialize();
 
       if (mounted) {
@@ -267,9 +271,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       }
       // Retry after a delay if initialization failed
       Future.delayed(const Duration(seconds: 2), () {
-        if (mounted &&
-            (_controller == null || !_controller!.value.isInitialized)) {
-          _initCamera();
+        if (mounted) {
+          if (_controller == null || !_controller!.value.isInitialized) {
+            _initCamera();
+          }
         }
       });
     }
@@ -277,7 +282,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
 
   /// ✅ FIXED CAPTURE LOGIC WITH LIVE PROGRESS
   Future<void> _captureAndSend() async {
-    if (_processing || _controller == null) return;
+    if (_processing || _controller == null || !_controller!.value.isInitialized) {
+      return;
+    }
 
     setState(() {
       _processing = true;
@@ -287,6 +294,14 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     });
 
     try {
+      // Re-check controller before use (it might have been disposed)
+      if (_controller == null || !_controller!.value.isInitialized) {
+        setState(() {
+          _processing = false;
+        });
+        return;
+      }
+
       // Step 1: Capturing image (0-25%)
       _updateProgressSmoothly(0.25,
           duration: const Duration(milliseconds: 400));
@@ -497,9 +512,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         barrierDismissible: false,
         barrierColor: Colors.black.withOpacity(0.5),
         builder: (dialogContext) {
-          // Auto-close after 3 seconds
+          // Auto-close after 5 seconds
           Future.delayed(const Duration(seconds: 5), () {
-            if (dialogContext.mounted) {
+            if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
               Navigator.of(dialogContext).pop();
             }
           });
@@ -533,7 +548,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             actions: [
               ElevatedButton(
                 onPressed: () {
-                  Navigator.of(dialogContext).pop();
+                  if (Navigator.of(dialogContext).canPop()) {
+                    Navigator.of(dialogContext).pop();
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.redAccent,
@@ -671,9 +688,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       barrierColor: Colors.black.withOpacity(0.5),
       builder: (dialogContext) {
-        // Auto-close after 3 seconds
+        // Auto-close after 30 seconds
         Future.delayed(const Duration(seconds: 30), () {
-          if (dialogContext.mounted) {
+          if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
             Navigator.of(dialogContext).pop();
           }
         });
@@ -762,7 +779,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           actions: [
             ElevatedButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop();
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF72BF45),
@@ -877,7 +896,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             // Cancel button
             TextButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop();
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
                 onCancel();
               },
               child: Text(
@@ -891,7 +912,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             // Confirm button
             ElevatedButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop();
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
                 onConfirm();
               },
               style: ElevatedButton.styleFrom(
@@ -921,9 +944,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       barrierColor: Colors.black.withOpacity(0.5),
       builder: (dialogContext) {
-        // Auto-close after 3 seconds
+        // Auto-close after 5 seconds
         Future.delayed(const Duration(seconds: 5), () {
-          if (dialogContext.mounted) {
+          if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
             Navigator.of(dialogContext).pop();
           }
         });
@@ -987,7 +1010,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           actions: [
             ElevatedButton(
               onPressed: () {
-                Navigator.of(dialogContext).pop();
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent,
@@ -1102,21 +1127,33 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                               ],
                             ),
                             child: ClipOval(
-                              child: AspectRatio(
-                                aspectRatio: _controller!.value.aspectRatio,
-                                child: FittedBox(
-                                  fit: BoxFit.cover,
-                                  child: SizedBox(
-                                    width: _controller!
-                                            .value.previewSize?.height ??
-                                        260,
-                                    height:
-                                        _controller!.value.previewSize?.width ??
-                                            260,
-                                    child: CameraPreview(_controller!),
-                                  ),
-                                ),
-                              ),
+                              child: _controller != null &&
+                                      _controller!.value.isInitialized &&
+                                      _controller!.value.aspectRatio > 0
+                                  ? AspectRatio(
+                                      aspectRatio: _controller!.value.aspectRatio,
+                                      child: FittedBox(
+                                        fit: BoxFit.cover,
+                                        child: SizedBox(
+                                          width: _controller!
+                                                  .value.previewSize?.height ??
+                                              260,
+                                          height: _controller!
+                                                  .value.previewSize?.width ??
+                                              260,
+                                          child: CameraPreview(_controller!),
+                                        ),
+                                      ),
+                                    )
+                                  : const SizedBox(
+                                      width: 260,
+                                      height: 260,
+                                      child: Center(
+                                        child: CircularProgressIndicator(
+                                          color: Color(0xFF72BF45),
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ),
 
