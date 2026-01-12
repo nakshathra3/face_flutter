@@ -507,7 +507,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           return BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
             child: AlertDialog(
-            backgroundColor: const Color(0xFF1C1A1A),
+              backgroundColor: const Color(0xFF1C1A1A),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
               side: const BorderSide(
@@ -678,10 +678,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           }
         });
 
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: AlertDialog(
-          backgroundColor: const Color(0xFF1C1A1A),
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: AlertDialog(
+              backgroundColor: const Color(0xFF1C1A1A),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(
@@ -796,10 +796,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       barrierDismissible: false,
       barrierColor: Colors.black.withOpacity(0.5),
       builder: (dialogContext) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: AlertDialog(
-          backgroundColor: const Color(0xFF1C1A1A),
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: AlertDialog(
+              backgroundColor: const Color(0xFF1C1A1A),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(
@@ -928,10 +928,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           }
         });
 
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: AlertDialog(
-          backgroundColor: const Color(0xFF1C1A1A),
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: AlertDialog(
+              backgroundColor: const Color(0xFF1C1A1A),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(

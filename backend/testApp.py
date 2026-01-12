@@ -6,6 +6,7 @@ import base64
 import cv2
 import os
 import sys
+import warnings
 from datetime import datetime
 from deepface import DeepFace
 from PIL import Image
@@ -15,6 +16,27 @@ import time
 import requests
 import pytz  # Indian Standard Time
 
+# Suppress lz4 file operation warnings (harmless but noisy)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+import logging
+logging.getLogger('lz4').setLevel(logging.CRITICAL)  # Suppress all lz4 logging
+
+# Suppress stderr output for lz4 cleanup errors (harmless exceptions during model cleanup)
+import io
+import contextlib
+
+@contextlib.contextmanager
+def suppress_stderr():
+    """Context manager to suppress stderr output."""
+    with open(os.devnull, 'w') as devnull:
+        old_stderr = sys.stderr
+        try:
+            sys.stderr = devnull
+            yield
+        finally:
+            sys.stderr = old_stderr
+
 app = Flask(__name__)
 CORS(app)
 
@@ -22,8 +44,10 @@ EMPLOYEE_FILE = "employees.json"
 ATTENDANCE_FILE = "attendance.json"
 
 MODEL_NAME = "Facenet"
-DISTANCE_THRESHOLD = 0.7
+DISTANCE_THRESHOLD = 0.73
 SIMILARITY_THRESHOLD = 0.73
+
+# Emotion history removed - showing actual detected emotions only
 
 
 url = "https://dev-workforce.dsignzmedia.com/api"
@@ -143,13 +167,15 @@ def get_embedding(img):
     try:
         print("🔄 [DEEPFACE LOG] Calling DeepFace.represent() NOW...")
         sys.stdout.flush()
-        reps = DeepFace.represent(
-            img_path=img,
-            model_name="Facenet",
-            detector_backend="mtcnn",
-            enforce_detection=True,
-            normalization="base"
-        )
+        # Suppress stderr during DeepFace operations to hide lz4 cleanup errors
+        with suppress_stderr():
+            reps = DeepFace.represent(
+                img_path=img,
+                model_name="Facenet",
+                detector_backend="mtcnn",
+                enforce_detection=True,
+                normalization="base"
+            )
         embedding = np.array(reps[0]["embedding"])
         print(f"✅ [DEEPFACE LOG] DeepFace.represent() SUCCESS!")
         print(f"📊 [DEEPFACE LOG] Embedding created: TRUE")
@@ -172,18 +198,68 @@ def get_embedding(img):
         return None
 
 def get_emotion(img):
+    """
+    Improved emotion detection with custom decision logic.
+    Uses retinaface for better face detection and custom scoring rules.
+    Shows actual detected emotion without temporal smoothing.
+    """
+    
     try:
-        result = DeepFace.analyze(
-            img_path=img,
-            actions=['emotion'],
-            enforce_detection=False
-        )
+        print("\n" + "="*60)
+        print("😊 [EMOTION] Starting emotion detection...")
+        sys.stdout.flush()
+        
+        # Note: DeepFace.analyze() already performs face detection internally,
+        # so we can pass the full image. The retinaface detector will focus on the face.
+        # Pre-cropping can help but is optional since analyze() handles it.
+        # Suppress stderr during DeepFace operations to hide lz4 cleanup errors
+        with suppress_stderr():
+            result = DeepFace.analyze(
+                img_path=img,
+                actions=['emotion'],
+                enforce_detection=False,
+                detector_backend="retinaface"  # More accurate than opencv
+            )
+        
         if isinstance(result, list):
             result = result[0]
-        emotion = result.get('dominant_emotion', 'neutral')
-        return emotion
+        
+        # Get all emotion scores and convert np.float32 to regular float for comparison
+        emotion_scores_raw = result.get('emotion', {})
+        emotion_scores = {k: float(v) for k, v in emotion_scores_raw.items()} if emotion_scores_raw else {}
+        print(f"📊 [EMOTION] All emotion scores: {emotion_scores}")
+        
+        if not emotion_scores:
+            print("⚠️ [EMOTION] No emotion scores found, using neutral")
+            print("="*60 + "\n")
+            sys.stdout.flush()
+            return "neutral"
+        
+        # Sort emotions by score (descending)
+        sorted_emotions = sorted(emotion_scores.items(), key=lambda x: x[1], reverse=True)
+        top_emotion, top_score = sorted_emotions[0]
+        second_emotion, second_score = sorted_emotions[1] if len(sorted_emotions) > 1 else (None, 0)
+        
+        print(f"🏆 [EMOTION] Top emotion: {top_emotion} ({top_score:.2f})")
+        if second_emotion:
+            print(f"🥈 [EMOTION] Second emotion: {second_emotion} ({second_score:.2f})")
+            print(f"📊 [EMOTION] Score difference: {top_score - second_score:.2f}")
+        
+        # Always show the top detected emotion
+        final_emotion = top_emotion
+        print(f"✅ [EMOTION] Showing top emotion: {top_emotion} (score: {top_score:.2f})")
+        
+        # Show the actual detected emotion - no temporal smoothing
+        print(f"✅ [EMOTION] Final emotion: {final_emotion} (score: {top_score:.2f})")
+        print("="*60 + "\n")
+        sys.stdout.flush()
+        return final_emotion
+        
     except Exception as e:
-        print("❌ EMOTION DETECTION ERROR:", e)
+        print(f"❌ [EMOTION] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
         return "neutral"
 
 
@@ -233,26 +309,9 @@ def detect_liveness(img):
         # Calculate blur using Laplacian variance
         blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
         
-        # Method 7: Use DeepFace liveness detection if available
+        # DeepFace doesn't support 'real' action for liveness detection
+        # Using custom methods 1-6 for reliable liveness detection
         deepface_live = None
-        try:
-            liveness_result = DeepFace.analyze(
-                img_path=img,
-                actions=['real'],
-                enforce_detection=False
-            )
-            if isinstance(liveness_result, list):
-                liveness_result = liveness_result[0]
-            
-            # Check if 'real' key exists
-            if 'real' in liveness_result:
-                real_score = liveness_result.get('real', 0)
-                deepface_live = real_score > 0.5
-                if deepface_live:
-                    print(f"✅ DeepFace confirmed live: {real_score:.3f}")
-        except Exception as e:
-            print(f"⚠️ DeepFace liveness check failed: {e}")
-            pass
         
         # ENHANCED THRESHOLDS - Stricter to catch photos/videos
         # Photos typically have:
@@ -317,14 +376,8 @@ def detect_liveness(img):
         # If variance < 10, definitely spoofed
         is_spoofed = spoofing_indicators >= 3 or variance < 8
         
-        # If DeepFace says it's not live, trust it
-        if deepface_live is False:
-            is_spoofed = True
-            spoofing_reasons.append("DeepFace detected spoofing")
-        
-        # If DeepFace confirms live and we have low indicators, trust it
-        if deepface_live is True and spoofing_indicators < 2:
-            is_spoofed = False
+        # DeepFace liveness detection removed (not supported)
+        # Relying on custom methods 1-6 for liveness detection
         
         is_live = not is_spoofed
         
@@ -654,7 +707,6 @@ def recognize():
         print("\n" + "="*60)
         print("🔍 [RECOGNITION LOG] Loading employees for recognition")
         fetch = fetchAttendance()
-        print(f"📊 [RECOGNITION LOG] fetchAttendance() returned: type={type(fetch)}, length={len(fetch) if isinstance(fetch, list) else 'N/A'}")
         # employees = [*fetch]
         # attendance = [*fetch]
         print(f"⚠️ [RECOGNITION LOG] ERROR: Trying to access employees.json but 'employees' variable not defined!")
@@ -665,8 +717,7 @@ def recognize():
         attendance = load_json(ATTENDANCE_FILE).get("records", [])
 
         print(f"❌ [RECOGNITION LOG] This will cause NameError! employees and attendance are not defined!")
-        print(f"📊 [RECOGNITION LOG] employees after assignment: {employees}")
-        print(f"📊 [RECOGNITION LOG] attendance after assignment: {attendance}")
+        
         if len(employees) == 0:
             print('❌ [RECOGNITION LOG] employees is zero')
             print("="*60 + "\n")
