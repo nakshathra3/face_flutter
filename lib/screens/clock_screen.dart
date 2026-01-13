@@ -181,7 +181,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_controller != null && _controller!.value.isInitialized) {
-      if (state == AppLifecycleState.inactive) {
+      if (state == AppLifecycleState.paused) {
         _controller!.dispose();
         _controller = null;
       } else if (state == AppLifecycleState.resumed) {
@@ -1555,10 +1555,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                               boxShadow: [
                                 BoxShadow(
                                   color:
-                                      const Color(0xFF57C200).withOpacity(0.4),
-                                  blurRadius: 30,
-                                ),
-                              ],
+                                    const Color(0xFF57C200).withOpacity(0.4),
+                                    blurRadius: 30,
+                                  ),
+                                ],
                             ),
                             child: ClipOval(
                               child: _controller != null &&
@@ -1575,7 +1575,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                                           height: _controller!
                                                   .value.previewSize?.width ??
                                               260,
-                                          child: CameraPreview(_controller!),
+                                          child: CameraPreview(
+                                            _controller!,
+                                            key: ValueKey(_controller!.description.name),
+                                          ),
                                         ),
                                       ),
                                     )

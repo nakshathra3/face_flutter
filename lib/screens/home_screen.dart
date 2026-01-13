@@ -469,15 +469,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           if (_thoughtName.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+          Text(
               "— $_thoughtName",
-              textAlign: TextAlign.center,
+            textAlign: TextAlign.center,
               style: const TextStyle(
                 color: textMuted,
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
               ),
-            ),
+          ),
           ],
         ],
       ),

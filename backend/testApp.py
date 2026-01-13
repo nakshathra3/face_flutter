@@ -44,8 +44,8 @@ EMPLOYEE_FILE = "employees.json"
 ATTENDANCE_FILE = "attendance.json"
 
 MODEL_NAME = "Facenet"
-DISTANCE_THRESHOLD = 0.73
-SIMILARITY_THRESHOLD = 0.73
+DISTANCE_THRESHOLD = 0.7
+SIMILARITY_THRESHOLD = 0.72
 
 # Emotion history removed - showing actual detected emotions only
 
@@ -169,23 +169,23 @@ def get_embedding(img):
         sys.stdout.flush()
         # Suppress stderr during DeepFace operations to hide lz4 cleanup errors
         with suppress_stderr():
-        reps = DeepFace.represent(
-            img_path=img,
-            model_name="Facenet",
-            detector_backend="mtcnn",
-            enforce_detection=True,
-            normalization="base"
-        )
-        embedding = np.array(reps[0]["embedding"])
-        print(f"✅ [DEEPFACE LOG] DeepFace.represent() SUCCESS!")
-        print(f"📊 [DEEPFACE LOG] Embedding created: TRUE")
-        print(f"📊 [DEEPFACE LOG] Embedding shape: {embedding.shape}")
-        print(f"📊 [DEEPFACE LOG] Embedding dtype: {embedding.dtype}")
-        print(f"📊 [DEEPFACE LOG] Embedding first 5 values: {embedding[:5]}")
-        print(f"📊 [DEEPFACE LOG] Embedding length: {len(embedding)}")
-        print("="*60 + "\n")
-        sys.stdout.flush()
-        return embedding
+            reps = DeepFace.represent(
+                img_path=img,
+                model_name="Facenet",
+                detector_backend="mtcnn",
+                enforce_detection=True,
+                normalization="base"
+            )
+            embedding = np.array(reps[0]["embedding"])
+            print(f"✅ [DEEPFACE LOG] DeepFace.represent() SUCCESS!")
+            print(f"📊 [DEEPFACE LOG] Embedding created: TRUE")
+            print(f"📊 [DEEPFACE LOG] Embedding shape: {embedding.shape}")
+            print(f"📊 [DEEPFACE LOG] Embedding dtype: {embedding.dtype}")
+            print(f"📊 [DEEPFACE LOG] Embedding first 5 values: {embedding[:5]}")
+            print(f"📊 [DEEPFACE LOG] Embedding length: {len(embedding)}")
+            print("="*60 + "\n")
+            sys.stdout.flush()
+            return embedding
     except Exception as e:
         print(f"❌ [DEEPFACE LOG] DeepFace.represent() FAILED!")
         print(f"❌ [DEEPFACE LOG] Error: {e}")
@@ -214,12 +214,12 @@ def get_emotion(img):
         # Pre-cropping can help but is optional since analyze() handles it.
         # Suppress stderr during DeepFace operations to hide lz4 cleanup errors
         with suppress_stderr():
-        result = DeepFace.analyze(
-            img_path=img,
-            actions=['emotion'],
+            result = DeepFace.analyze(
+                img_path=img,
+                actions=['emotion'],
                 enforce_detection=False,
                 detector_backend="retinaface"  # More accurate than opencv
-        )
+            )
         
         if isinstance(result, list):
             result = result[0]
