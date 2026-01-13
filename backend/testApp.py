@@ -45,7 +45,7 @@ ATTENDANCE_FILE = "attendance.json"
 
 MODEL_NAME = "Facenet"
 DISTANCE_THRESHOLD = 0.7
-SIMILARITY_THRESHOLD = 0.72
+SIMILARITY_THRESHOLD = 0.73
 
 # Emotion history removed - showing actual detected emotions only
 

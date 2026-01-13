@@ -17,6 +17,7 @@ class ApiService {
   //static const String _baseUrl = "http://192.168.29.91:5000";
   //static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
   //static const String _baseUrl = "http://192.168.1.102:5000";
+  //static const String _baseUrl = "https://dev-workforceapi.dsignzmedia.com";
   static const String _baseUrl = "http://192.168.29.216:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
@@ -321,8 +322,8 @@ class ApiService {
                   final sortedNotices = List<Map>.from(notices);
                   sortedNotices.sort((a, b) {
                     try {
-                      final dateA = a['created_at']?.toString() ?? "";
-                      final dateB = b['created_at']?.toString() ?? "";
+                      final dateA = a['display_date']?.toString() ?? "";
+                      final dateB = b['display_date']?.toString() ?? "";
                       // Parse dates and compare (most recent first = descending order)
                       if (dateA.isNotEmpty && dateB.isNotEmpty) {
                         final parsedA = DateTime.tryParse(dateA.replaceAll(" ", "T"));
