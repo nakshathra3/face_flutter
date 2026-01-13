@@ -703,7 +703,9 @@ class _EnrollmentScreenState extends State<EnrollmentScreen>
                         child: SizedBox(
                           width: _controller!.value.previewSize?.height ?? 240,
                           height: _controller!.value.previewSize?.width ?? 240,
-                          child: CameraPreview(_controller!),
+                          child: CameraPreview(
+                            _controller!,
+                            key: ValueKey(_controller!.description.name),),
                         ),
                       ),
                     ),
