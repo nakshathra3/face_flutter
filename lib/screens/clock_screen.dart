@@ -9,6 +9,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../widgets/bottom_nav.dart';
 
+import '../camera_cache.dart';
+
 class ClockScreen extends StatefulWidget {
   const ClockScreen({super.key});
 
@@ -224,8 +226,8 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
+      final cameras = cachedCameras;
+      if (cameras == null || cameras.isEmpty) {
         print("❌ [CLOCK] No cameras available");
         if (mounted) {
           setState(() {

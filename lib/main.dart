@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
+import 'package:camera/camera.dart';
+import 'camera_cache.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🔥 THIS RUNS ON APP LAUNCH (ONLY ONCE)
+  cachedCameras = await availableCameras();
+
   runApp(const AttendanceApp());
 }
 
