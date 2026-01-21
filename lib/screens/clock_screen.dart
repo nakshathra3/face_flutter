@@ -162,6 +162,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   bool _isInitializing = false;
   bool _isDetectingFace = false;
 
+  DateTime? _blinkWindowStart;
+  bool _eyesWereOpen = false;
+  bool _eyesWereClosed = false;
+
   late FaceDetector _faceDetector;
 
   int _closedEyeFrames = 0;
@@ -304,22 +308,70 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   
   // 🔐 PREVIEW-BASED LIVENESS CHECK (NO IMAGE CAPTURE)
   // 🔐 PREVIEW-BASED LIVENESS CHECK (REAL & SAFE)
-  //
-  Future<bool> _detectBlinkFromCapturedImage(String imagePath) async {
-    final inputImage = InputImage.fromFilePath(imagePath);
-    final faces = await _faceDetector.processImage(inputImage);
+  Future<bool> _detectBlinkWithinTimeWindow({
+    required Duration maxDuration,
+  }) async {
+    _blinkWindowStart = DateTime.now();
+    _eyesWereOpen = false;
+    _eyesWereClosed = false;
 
-    if (faces.isEmpty) return false;
+    while (DateTime.now().difference(_blinkWindowStart!) < maxDuration) {
+      // Capture a lightweight frame
+      final image = await _controller!.takePicture();
 
-    final face = faces.first;
-    final left = face.leftEyeOpenProbability;
-    final right = face.rightEyeOpenProbability;
+      final inputImage = InputImage.fromFilePath(image.path);
+      final faces = await _faceDetector.processImage(inputImage);
 
-    if (left == null || right == null) return false;
+      if (faces.isNotEmpty) {
+        final face = faces.first;
+        final left = face.leftEyeOpenProbability;
+        final right = face.rightEyeOpenProbability;
 
-    final avg = (left + right) / 2;
-    return avg < 0.30; // eyes closed
+        if (left != null && right != null) {
+          final avg = (left + right) / 2;
+
+          if (avg > 0.55) {
+            _eyesWereOpen = true;
+          }
+
+          if (avg < 0.30) {
+            _eyesWereClosed = true;
+          }
+
+          // ✅ OPEN → CLOSED detected = BLINK
+          if (_eyesWereOpen && _eyesWereClosed) {
+            return true;
+          }
+        } else {
+          // Glasses fallback
+          if (_fallbackLiveness(face)) {
+            return true;
+          }
+        }
+      }
+
+      // Small delay so we don't hammer the camera
+      await Future.delayed(const Duration(milliseconds: 180));
+    }
+
+    return false;
   }
+
+
+  bool _fallbackLiveness(Face face) {
+    // Head movement check
+    final yaw = face.headEulerAngleY ?? 0;
+
+    // Face must be large & centered (prevents phone photo spoof)
+    final box = face.boundingBox;
+    final area = box.width * box.height;
+
+    if (area < 9000) return false; // photo usually smaller
+
+    // Require slight head turn
+    return yaw.abs() > 6.0;
+  }
+
 
   /// ✅ FIXED CAPTURE LOGIC WITH LIVE PROGRESS
   Future<void> _captureAndSend() async {
@@ -344,8 +396,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       }
 
       // 🔐 LIVENESS CHECK BEFORE CAPTURE
-      final image = await _controller!.takePicture();
-      final blinked = await _detectBlinkFromCapturedImage(image.path);
+      final blinked = await _detectBlinkWithinTimeWindow(
+        maxDuration: const Duration(seconds: 2),
+      );
 
       if (!blinked) {
         setState(() {
@@ -355,11 +408,14 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
 
         _showClockErrorDialog(
           imageBase64: "",
-          message: "Blink not detected. Please blink once and try again.",
+          message: "Please blink naturally once within 2 seconds.",
           isSpoof: true,
         );
         return;
       }
+
+      // Capture FINAL image AFTER liveness passes
+      final image = await _controller!.takePicture();
 
       // Step 1: Capturing image (0-25%)
       _updateProgressSmoothly(0.25, duration: Duration(milliseconds: 400));
