@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'dart:math';
 
 import '../services/api_service.dart';
 import '../widgets/bottom_nav.dart';
@@ -157,6 +160,12 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   bool _loading = true;
   bool _processing = false;
   bool _isInitializing = false;
+  bool _isDetectingFace = false;
+
+  late FaceDetector _faceDetector;
+
+  int _closedEyeFrames = 0;
+  bool _blinkDetected = false;
 
   String _statusText = "Ready";
   bool _success = true; // controls status icon color
@@ -178,6 +187,14 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _startClock();
     _initCamera();
+    _faceDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        enableLandmarks: true,
+        enableContours: false,
+        enableClassification: true, // REQUIRED for eye open probability
+        performanceMode: FaceDetectorMode.fast,
+      ),
+    );
   }
 
   @override
@@ -208,6 +225,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     _isInitializing = true;
 
     try {
+      final hadController = _controller != null;
       // Dispose existing controller if any
       if (_controller != null) {
         try {
@@ -218,8 +236,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         _controller = null;
       }
 
-      // Delay to ensure previous camera is fully released (1.5 seconds for loading)
-      await Future.delayed(const Duration(milliseconds: 1500));
+      // Delay to ensure previous camera is fully released (0.8 seconds for loading)
+      if (hadController) {
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
 
       if (!mounted) {
         _isInitializing = false;
@@ -247,7 +267,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         front,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
       if (_controller == null) {
@@ -275,11 +295,30 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           if (_controller == null || !_controller!.value.isInitialized) {
-            _initCamera();
+          _initCamera();
           }
         }
       });
     }
+  }
+  
+  // 🔐 PREVIEW-BASED LIVENESS CHECK (NO IMAGE CAPTURE)
+  // 🔐 PREVIEW-BASED LIVENESS CHECK (REAL & SAFE)
+  //
+  Future<bool> _detectBlinkFromCapturedImage(String imagePath) async {
+    final inputImage = InputImage.fromFilePath(imagePath);
+    final faces = await _faceDetector.processImage(inputImage);
+
+    if (faces.isEmpty) return false;
+
+    final face = faces.first;
+    final left = face.leftEyeOpenProbability;
+    final right = face.rightEyeOpenProbability;
+
+    if (left == null || right == null) return false;
+
+    final avg = (left + right) / 2;
+    return avg < 0.30; // eyes closed
   }
 
   /// ✅ FIXED CAPTURE LOGIC WITH LIVE PROGRESS
@@ -304,10 +343,26 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // Step 1: Capturing image (0-25%)
-      _updateProgressSmoothly(0.25,
-          duration: const Duration(milliseconds: 400));
+      // 🔐 LIVENESS CHECK BEFORE CAPTURE
       final image = await _controller!.takePicture();
+      final blinked = await _detectBlinkFromCapturedImage(image.path);
+
+      if (!blinked) {
+        setState(() {
+          _processing = false;
+          _progress = 0.0;
+        });
+
+        _showClockErrorDialog(
+          imageBase64: "",
+          message: "Blink not detected. Please blink once and try again.",
+          isSpoof: true,
+        );
+        return;
+      }
+
+      // Step 1: Capturing image (0-25%)
+      _updateProgressSmoothly(0.25, duration: Duration(milliseconds: 400));
 
       // Step 2: Reading and encoding (25-50%)
       _updateProgressSmoothly(0.50,
@@ -524,7 +579,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           return BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
             child: AlertDialog(
-              backgroundColor: const Color(0xFF1C1A1A),
+            backgroundColor: const Color(0xFF1C1A1A),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
               side: const BorderSide(
@@ -551,7 +606,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               ElevatedButton(
                 onPressed: () {
                   if (Navigator.of(dialogContext).canPop()) {
-                    Navigator.of(dialogContext).pop();
+                  Navigator.of(dialogContext).pop();
                   }
                 },
                 style: ElevatedButton.styleFrom(
@@ -570,15 +625,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           );
         },
       );
-    } finally {
-      /// ✅ ALWAYS unlock button
-      if (mounted) {
-        setState(() {
-          _processing = false;
-          _progress = 0.0;
-        });
-      }
-    }
+    } 
   }
 
   /// Smoothly animate progress from current value to target
@@ -1134,7 +1181,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           return BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
             child: AlertDialog(
-              backgroundColor: const Color(0xFF1C1A1A),
+          backgroundColor: const Color(0xFF1C1A1A),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(
@@ -1158,12 +1205,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                   alignment: Alignment.center,
                   transform: Matrix4.identity()
                     ..scale(-1.0, 1.0), // Flip horizontally
-                  child: Image.memory(
-                    base64Decode(imageBase64),
-                    width: 200,
-                    height: 200,
-                    fit: BoxFit.cover,
-                  ),
+                  child: _safeImage(imageBase64, width: 200, height: 200),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1211,12 +1253,12 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                 ),
               ],
             ],
-            ),
+          ),
           actions: [
             ElevatedButton(
               onPressed: () {
                 if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
+                Navigator.of(dialogContext).pop();
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -1254,7 +1296,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           return BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
             child: AlertDialog(
-              backgroundColor: const Color(0xFF1C1A1A),
+          backgroundColor: const Color(0xFF1C1A1A),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(
@@ -1278,12 +1320,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                   alignment: Alignment.center,
                   transform: Matrix4.identity()
                     ..scale(-1.0, 1.0), // Flip horizontally
-                  child: Image.memory(
-                    base64Decode(imageBase64),
-                    width: 150,
-                    height: 150,
-                    fit: BoxFit.cover,
-                  ),
+                  child: _safeImage(imageBase64, width: 150, height: 150),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1333,7 +1370,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             TextButton(
               onPressed: () {
                 if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
+                Navigator.of(dialogContext).pop();
                 }
                 onCancel();
               },
@@ -1349,7 +1386,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             ElevatedButton(
               onPressed: () {
                 if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
+                Navigator.of(dialogContext).pop();
                 }
                 onConfirm();
               },
@@ -1374,6 +1411,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   void _showClockErrorDialog({
     required String imageBase64,
     required String message,
+    bool isSpoof = false,
   }) {
     showDialog(
       context: context,
@@ -1390,7 +1428,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
           return BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
             child: AlertDialog(
-              backgroundColor: const Color(0xFF1C1A1A),
+          backgroundColor: const Color(0xFF1C1A1A),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(
@@ -1399,7 +1437,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             ),
           ),
           title: Text(
-            "Face Not Identified",
+            isSpoof ? "Spoof Detected" : "Face Not Identified",
             style: GoogleFonts.inter(
               color: Colors.redAccent,
               fontWeight: FontWeight.bold,
@@ -1414,17 +1452,12 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                   alignment: Alignment.center,
                   transform: Matrix4.identity()
                     ..scale(-1.0, 1.0), // Flip horizontally
-                  child: Image.memory(
-                    base64Decode(imageBase64),
-                    width: 200,
-                    height: 200,
-                    fit: BoxFit.cover,
-                  ),
+                  child: _safeImage(imageBase64, width: 200, height: 200),
                 ),
               ),
               const SizedBox(height: 16),
               Text(
-                "Face not identified. Please retry.",
+                message,
                 style: GoogleFonts.inter(
                   color: Colors.redAccent,
                   fontSize: 16,
@@ -1447,7 +1480,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
             ElevatedButton(
               onPressed: () {
                 if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
+                Navigator.of(dialogContext).pop();
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -1475,6 +1508,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     _controller?.dispose();
     _controller = null;
     super.dispose();
+    _faceDetector.close();
   }
 
   @override
@@ -1557,23 +1591,23 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                               boxShadow: [
                                 BoxShadow(
                                   color:
-                                    const Color(0xFF57C200).withOpacity(0.4),
-                                    blurRadius: 30,
-                                  ),
-                                ],
+                                      const Color(0xFF57C200).withOpacity(0.4),
+                                  blurRadius: 30,
+                                ),
+                              ],
                             ),
                             child: ClipOval(
                               child: _controller != null &&
                                       _controller!.value.isInitialized &&
                                       _controller!.value.aspectRatio > 0
                                   ? AspectRatio(
-                                      aspectRatio: _controller!.value.aspectRatio,
-                                      child: FittedBox(
-                                        fit: BoxFit.cover,
-                                        child: SizedBox(
-                                          width: _controller!
-                                                  .value.previewSize?.height ??
-                                              260,
+                                aspectRatio: _controller!.value.aspectRatio,
+                                child: FittedBox(
+                                  fit: BoxFit.cover,
+                                  child: SizedBox(
+                                    width: _controller!
+                                            .value.previewSize?.height ??
+                                        260,
                                           height: _controller!
                                                   .value.previewSize?.width ??
                                               260,
@@ -1590,9 +1624,9 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
                                       child: Center(
                                         child: CircularProgressIndicator(
                                           color: Color(0xFF72BF45),
-                                        ),
-                                      ),
-                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
 
@@ -1652,6 +1686,33 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       ),
     );
   }
+
+  Widget _safeImage(String imageBase64,
+      {double width = 200, double height = 200}) {
+    if (imageBase64.isEmpty) {
+      return const Icon(
+        Icons.error_outline,
+        size: 80,
+        color: Colors.redAccent,
+      );
+    }
+
+    try {
+      return Image.memory(
+        base64Decode(imageBase64),
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+      );
+    } catch (_) {
+      return const Icon(
+        Icons.broken_image,
+        size: 80,
+        color: Colors.redAccent,
+      );
+    }
+  }
+
 
   Widget _tabButton(String label, String value) {
     final active = _activeTab == value;
