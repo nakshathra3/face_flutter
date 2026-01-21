@@ -262,154 +262,6 @@ def get_emotion(img):
         sys.stdout.flush()
         return "neutral"
 
-
-def detect_liveness(img):
-    """
-    Enhanced anti-spoofing detection to check if image is from live camera or video/photo.
-    Returns: (is_live: bool, confidence: float, reason: str)
-    """
-    try:
-        # Method 1: Check image variance (live cameras have more variance/noise)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        variance = cv2.Laplacian(gray, cv2.CV_64F).var()
-        
-        # Method 2: Check edge density (live cameras have more natural edges)
-        edges = cv2.Canny(gray, 50, 150)
-        edge_density = np.sum(edges > 0) / (edges.shape[0] * edges.shape[1])
-        
-        # Method 3: Check for JPEG compression artifacts (common in photos)
-        # Photos often have block artifacts from JPEG compression
-        h, w = gray.shape
-        block_size = 8
-        jpeg_artifacts = 0
-        for i in range(0, h - block_size, block_size):
-            for j in range(0, w - block_size, block_size):
-                block = gray[i:i+block_size, j:j+block_size]
-                block_variance = np.var(block)
-                # Low variance in blocks suggests JPEG compression
-                if block_variance < 5:
-                    jpeg_artifacts += 1
-        jpeg_artifact_ratio = jpeg_artifacts / ((h // block_size) * (w // block_size))
-        
-        # Method 4: Check color consistency (photos are more uniform)
-        # Convert to HSV and check saturation variance
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        saturation = hsv[:, :, 1]
-        saturation_variance = np.var(saturation)
-        
-        # Method 5: Check for screen reflection patterns (common when showing phone/tablet)
-        # Photos/videos shown on screens have different reflection patterns
-        # Calculate gradient magnitude
-        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
-        gradient_variance = np.var(gradient_magnitude)
-        
-        # Method 6: Check for motion blur patterns (videos often have blur)
-        # Calculate blur using Laplacian variance
-        blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-        
-        # DeepFace doesn't support 'real' action for liveness detection
-        # Using custom methods 1-6 for reliable liveness detection
-        deepface_live = None
-        
-        # ENHANCED THRESHOLDS - Stricter to catch photos/videos
-        # Photos typically have:
-        # - Very low variance (< 30)
-        # - Low edge density (< 0.05)
-        # - High JPEG artifact ratio (> 0.3)
-        # - Low saturation variance (< 500)
-        # - Low gradient variance (< 1000)
-        
-        # Videos typically have:
-        # - Low variance (< 50)
-        # - Motion blur (low blur_score)
-        # - Compression artifacts
-        
-        MIN_VARIANCE = 22  # Stricter threshold for photos
-        MIN_EDGE_DENSITY = 0.035  # Stricter threshold
-        MAX_JPEG_ARTIFACTS = 0.3  # High ratio suggests photo
-        MIN_SATURATION_VARIANCE = 400  # Photos have more uniform colors
-        MIN_GRADIENT_VARIANCE = 750  # Photos have less natural gradients
-        MIN_BLUR_SCORE = 40  # Videos/photos often have more blur
-        
-        # Calculate spoofing indicators
-        spoofing_indicators = 0
-        spoofing_reasons = []
-        
-        # Check 1: Very low variance (strong indicator of photo)
-        if variance < MIN_VARIANCE:
-            spoofing_indicators += 2  # Weight this heavily
-            spoofing_reasons.append(f"low variance ({variance:.1f} < {MIN_VARIANCE})")
-        
-        # Check 2: Low edge density (photo indicator)
-        if edge_density < MIN_EDGE_DENSITY:
-            spoofing_indicators += 1
-            spoofing_reasons.append(f"low edge density ({edge_density:.3f} < {MIN_EDGE_DENSITY})")
-        
-        # Check 3: High JPEG artifacts (photo indicator)
-        if jpeg_artifact_ratio > MAX_JPEG_ARTIFACTS:
-            spoofing_indicators += 2  # Weight this heavily
-            spoofing_reasons.append(f"high JPEG artifacts ({jpeg_artifact_ratio:.3f} > {MAX_JPEG_ARTIFACTS})")
-        
-        # Check 4: Low saturation variance (photo indicator - uniform colors)
-        if saturation_variance < MIN_SATURATION_VARIANCE:
-            spoofing_indicators += 1
-            spoofing_reasons.append(f"low color variance ({saturation_variance:.1f} < {MIN_SATURATION_VARIANCE})")
-        
-        # Check 5: Low gradient variance (photo indicator)
-        if gradient_variance < MIN_GRADIENT_VARIANCE:
-            spoofing_indicators += 1
-            spoofing_reasons.append(f"low gradient variance ({gradient_variance:.1f} < {MIN_GRADIENT_VARIANCE})")
-        
-        # Check 6: High blur (video/photo indicator)
-        if blur_score < MIN_BLUR_SCORE:
-            spoofing_indicators += 1
-            spoofing_reasons.append(f"high blur ({blur_score:.1f} < {MIN_BLUR_SCORE})")
-        
-        # Check 7: Extremely low variance (< 10) is almost certainly a photo
-        if variance < 8:
-            spoofing_indicators += 3  # Very strong indicator
-            spoofing_reasons.append(f"extremely low variance ({variance:.1f})")
-        
-        # Decision: If 3+ indicators, likely spoofed
-        # If variance < 10, definitely spoofed
-        is_spoofed = spoofing_indicators >= 3 or variance < 8
-        
-        # DeepFace liveness detection removed (not supported)
-        # Relying on custom methods 1-6 for liveness detection
-        
-        is_live = not is_spoofed
-        
-        # Calculate confidence based on indicators
-        # More indicators = lower confidence
-        if is_spoofed:
-            confidence = max(0.0, 1.0 - (spoofing_indicators * 0.15))
-        else:
-            confidence = min(1.0, 0.5 + (variance / 200) * 0.3 + (edge_density / 0.2) * 0.2)
-        
-        if is_spoofed:
-            reason = f"Spoofing detected: {', '.join(spoofing_reasons)}"
-        else:
-            reason = f"Live camera detected (variance: {variance:.1f}, edges: {edge_density:.3f})"
-        
-        print(f"🔍 Liveness check: variance={variance:.1f}, edges={edge_density:.3f}, "
-              f"jpeg_artifacts={jpeg_artifact_ratio:.3f}, sat_var={saturation_variance:.1f}, "
-              f"grad_var={gradient_variance:.1f}, blur={blur_score:.1f}, "
-              f"indicators={spoofing_indicators}, is_live={is_live}, confidence={confidence:.3f}")
-        
-        return (is_live, confidence, reason)
-    except Exception as e:
-        print(f"⚠️ Liveness detection error: {e}")
-        import traceback
-        traceback.print_exc()
-        # If detection fails, be conservative and reject (better safe than sorry)
-        return (False, 0.3, f"Liveness check failed: {str(e)}")
-
-def is_spoofed_strict_result(is_live, confidence, reason):
-    """Strict policy helper: returns True if detector indicates spoof (ignore confidence)."""
-    return not is_live
-
 # def cosine_similarity(a, b):
 #     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 def cosine_similarity(a, b):
@@ -524,16 +376,16 @@ def enroll():
         print(f"📸 [ENROLLMENT LOG] After imgToConverterToRequirements(): img type={type(img)}, value={img}")
         if img is None:
             print(f"❌ [ENROLLMENT LOG] CRITICAL: img is None after imgToConverterToRequirements() - embedding extraction will FAIL!")
-        is_live, liveness_confidence, liveness_reason = detect_liveness(img)
-        print(f"🔍 Liveness check result: is_live={is_live}, confidence={liveness_confidence:.3f}, reason={liveness_reason}")
-        # Strict policy: reject if detector marks as not live
-        if is_spoofed_strict_result(is_live, liveness_confidence, liveness_reason):            
-            print(f"🚫 SPOOFING DETECTED during enrollment: {liveness_reason}")
-            return jsonify({
-                "success": False,
-                "message": "Spoofing detected - Please use live camera, not video or photo",
-                "reason": liveness_reason
-            }), 400
+        # is_live, liveness_confidence, liveness_reason = detect_liveness(img)
+        # print(f"🔍 Liveness check result: is_live={is_live}, confidence={liveness_confidence:.3f}, reason={liveness_reason}")
+        # # Strict policy: reject if detector marks as not live
+        # if is_spoofed_strict_result(is_live, liveness_confidence, liveness_reason):            
+        #     print(f"🚫 SPOOFING DETECTED during enrollment: {liveness_reason}")
+        #     return jsonify({
+        #         "success": False,
+        #         "message": "Spoofing detected - Please use live camera, not video or photo",
+        #         "reason": liveness_reason
+        #     }), 400
     except Exception as e:
         print(f"⚠️ Liveness check error (continuing anyway): {e}")
 
@@ -672,22 +524,9 @@ def recognize():
         # --------------------
         # 3️⃣ Liveness detection
         # --------------------
-        is_live, liveness_confidence, liveness_reason = detect_liveness(img)
-        print(f"🔍 Liveness: {is_live}, confidence={liveness_confidence:.2f}, reason={liveness_reason}")
-        # Strict policy: reject if detector marks as not live
-        if is_spoofed_strict_result(is_live, liveness_confidence, liveness_reason):
-            print(f"🚫 SPOOFING DETECTED during recognition: {liveness_reason}")    
-            return jsonify({
-                "matched": False,
-                "message": "Spoofing detected - Please use live camera, not video or photo",
-                "reason": liveness_reason
-            }), 400
-        # Liveness check - reject obvious spoofing
-        if not is_live and liveness_confidence < 0.1:
-            return jsonify({
-                "matched": False,
-                "message": "Failed to recognize - Please use live camera, not video or photo"
-            }), 400
+        # LIVENESS IS VERIFIED ON FRONTEND VIA BLINK
+        # BACKEND DOES FACE MATCHING ONLY
+ 
         # --------------------
         # 4️⃣ Get face embedding
         # --------------------
@@ -1144,7 +983,7 @@ if __name__ == '__main__':
     # Start background thread for auto clock-out
    
     app.run(
-        host="192.168.29.216",  # your machine’s IP
+        host="192.168.1.152",  # your machine’s IP
         port=5000,
         debug=True
     )
