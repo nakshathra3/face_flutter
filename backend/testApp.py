@@ -131,13 +131,13 @@ def check_liveness_fast(img):
 
 def analyze_face_pipeline(img):
     """
-    OPTIMIZED PIPELINE: Detects face ONCE, then reuses it for Embedding & Emotion.
-    Saves ~50-70% processing time compared to running them separately.
+    OPTIMIZED PIPELINE: Detects face ONCE, reuses for Embedding & Emotion.
+    INCLUDES: Fix for "Always Angry" AND Sensitivity Boosts for ALL subtle emotions.
     """
     print("⚡ [PIPELINE] Starting optimized analysis...")
     sys.stdout.flush()
     try:
-        # 1. Detect Face (The expensive part) using SSD
+        # 1. Detect Face (SSD)
         with suppress_stderr():
             face_objs = DeepFace.extract_faces(
                 img_path=img,
@@ -149,46 +149,90 @@ def analyze_face_pipeline(img):
         if not face_objs:
             return None, None, "No face detected"
 
-        # DeepFace returns 'face' as a normalized float array (0-1)
-        # We grab the first face detected
+        # 2. Fix Image Format (RGB Float -> BGR Uint8)
         detected_face = face_objs[0]["face"] 
-        
-        # 2. Get Embedding (SKIP DETECTION - use cropped face)
+        if detected_face.max() <= 1.0:
+            detected_face_uint8 = (detected_face * 255).astype(np.uint8)
+        else:
+            detected_face_uint8 = detected_face.astype(np.uint8)
+
+        detected_face_bgr = cv2.cvtColor(detected_face_uint8, cv2.COLOR_RGB2BGR)
+
+        # 3. Get Embedding
         with suppress_stderr():
             embedding_objs = DeepFace.represent(
-                img_path=detected_face,
+                img_path=detected_face, 
                 model_name=MODEL_NAME,
-                detector_backend="skip", # Critical speed boost
+                detector_backend="skip",
                 enforce_detection=False,
                 normalization="base"
             )
         embedding = np.array(embedding_objs[0]["embedding"])
 
-        # 3. Get Emotion (SKIP DETECTION - use cropped face)
+        # 4. Get Emotion
         with suppress_stderr():
             emotion_objs = DeepFace.analyze(
-                img_path=detected_face,
+                img_path=detected_face_bgr, 
                 actions=['emotion'],
-                detector_backend="skip", # Critical speed boost
+                detector_backend="skip",
                 enforce_detection=False
             )
         
-        # Extract top emotion
         if isinstance(emotion_objs, list):
             result = emotion_objs[0]
         else:
             result = emotion_objs
             
-        # Get dominant emotion directly
+        # --- SENSITIVITY BOOST LOGIC ---
+        emotions = result.get('emotion', {})
         top_emotion = result.get('dominant_emotion', 'neutral')
         
-        print(f"✅ [PIPELINE] Success. Emotion: {top_emotion}")
+        # 1. Print Raw Scores (Debugging)
+        # This will show you exactly what the AI sees (e.g., Surprise: 22%)
+        print(f"📊 [RAW SCORES] {emotions}")
+
+        # 2. Define Thresholds for "Hidden" Emotions
+        # If the score is above these numbers, we consider it valid even if it didn't win.
+        THRESHOLDS = {
+            'surprise': 20.0, # Surprise is distinct, lower threshold ok
+            'fear': 25.0,     # Fear is hard, needs moderate evidence
+            'disgust': 25.0,  # Disgust often looks like anger
+            'sad': 25.0       # Sadness is subtle
+        }
+
+        # 3. Apply Logic: If Neutral wins, check for hidden gems
+        if top_emotion == 'neutral':
+            # Check in priority order (Surprise is usually the most distinct)
+            if emotions.get('surprise', 0) > THRESHOLDS['surprise']:
+                print(f"💡 [BOOST] Overriding Neutral -> Surprise ({emotions['surprise']:.1f}%)")
+                top_emotion = 'surprise'
+            
+            elif emotions.get('fear', 0) > THRESHOLDS['fear']:
+                print(f"💡 [BOOST] Overriding Neutral -> Fear ({emotions['fear']:.1f}%)")
+                top_emotion = 'fear'
+                
+            elif emotions.get('disgust', 0) > THRESHOLDS['disgust']:
+                print(f"💡 [BOOST] Overriding Neutral -> Disgust ({emotions['disgust']:.1f}%)")
+                top_emotion = 'disgust'
+
+            elif emotions.get('sad', 0) > THRESHOLDS['sad']:
+                print(f"💡 [BOOST] Overriding Neutral -> Sad ({emotions['sad']:.1f}%)")
+                top_emotion = 'sad'
+
+        # 4. Special Case: Disgust vs Anger
+        # Sometimes Disgust (e.g., 30%) loses to Anger (e.g., 40%) but is the real emotion.
+        # If Anger wins but is weak (<50%), and Disgust is close, pick Disgust.
+        elif top_emotion == 'angry' and emotions.get('angry', 0) < 50.0:
+            if emotions.get('disgust', 0) > 25.0:
+                print(f"💡 [BOOST] Overriding Weak Anger -> Disgust")
+                top_emotion = 'disgust'
+
+        print(f"✅ [PIPELINE] Final Emotion: {top_emotion}")
         return embedding, top_emotion, None
 
     except Exception as e:
         print(f"❌ [PIPELINE] Error: {e}")
         return None, None, str(e)
-
 # --- ROUTES ---
 
 @app.route("/test", methods=["GET", "POST"])
@@ -275,22 +319,20 @@ def recognize():
         if img is None:
             return jsonify({"matched": False, "message": "Invalid image"}), 400
 
-        # 2. Fast Liveness Check (0.002s)
+        # 2. Fast Liveness Check
         is_live, reason = check_liveness_fast(img)
-        # Uncomment to enforce blocking on spoof detection
-        # if not is_live:
-        #    return jsonify({"matched": False, "message": f"Spoof Detected: {reason}"}), 400
+        # if not is_live: return jsonify({"matched": False, "message": reason}), 400
 
-        # 3. AI Analysis (Pipeline) (~0.5 - 1.0s)
+        # 3. AI Analysis
         live_embedding, emotion, error = analyze_face_pipeline(img)
         
         if error:
-            return jsonify({"matched": False, "message": f"Face not detected: {error}"}), 400
+            return jsonify({"matched": False, "message": f"Face error: {error}"}), 400
 
         # 4. Fetch Employees
         employees = fetchAttendance()
         if not employees:
-            return jsonify({"matched": False, "message": "No employees found in DB"}), 400
+            return jsonify({"matched": False, "message": "No employees found"}), 400
 
         # 5. Find Best Match
         best_match = None
@@ -300,7 +342,6 @@ def recognize():
             stored_embedding = emp.get("face_embedding")
             if not stored_embedding: continue
             
-            # Handle string vs list embedding
             if isinstance(stored_embedding, str):
                 try: stored_embedding = json.loads(stored_embedding)
                 except: continue
@@ -312,63 +353,90 @@ def recognize():
 
         print(f"🏆 [MATCH] Best Score: {best_score:.4f} (Threshold: {DISTANCE_THRESHOLD})")
 
-        # 6. Check Threshold
         if best_match is None or best_score < DISTANCE_THRESHOLD:
             return jsonify({
                 "matched": False,
                 "message": f"Face not recognized (Confidence: {best_score:.2f})"
             }), 400
 
-        # 7. Attendance Logic (Your original Session Logic)
+        # 6. Session & Attendance Logic
         user_id = best_match.get("uuid") or best_match.get("user_id")
         employee_name = best_match.get("full_name") or best_match.get("name")
-        user_type = best_match.get("type") or ("intern" if (best_match.get("code") or "").startswith("INT") else "employee")
-        
+        # Ensure user_type is string (handle None)
+        user_type = str(best_match.get("type") or best_match.get("user_type") or "")
+        if not user_type:
+             if str(best_match.get("code") or "").startswith("INT"): user_type = "intern"
+             else: user_type = "employee"
+
         today = datetime.now().strftime("%Y-%m-%d")
         now = datetime.now().strftime("%H:%M:%S")
 
-        # Fetch active session
+        # --- IMPROVED ACTIVE SESSION CHECK ---
         active_session = None
         all_today_records = []
+        
         try:
+            # We fetch records filtered by date from API
             att_response = requests.get(
                 url + "/attendance",
                 params={"user_id": user_id, "date": today, "user_type": user_type},
                 timeout=5
             )
+            
             if att_response.status_code == 200:
                 att_data = att_response.json()
-                # Handle inconsistent API structure
+                # Parse varied API responses
                 if isinstance(att_data, dict) and "data" in att_data:
                     raw_data = att_data.get("data", {})
-                    recs = raw_data.get("employees", []) + raw_data.get("interns", [])
+                    # Handle both dict structure and direct list structure
+                    if isinstance(raw_data, list):
+                        recs = raw_data
+                    else:
+                        recs = raw_data.get("employees", []) + raw_data.get("interns", [])
                 elif isinstance(att_data, list):
                     recs = att_data
                 else:
                     recs = []
 
+                print(f"🔍 [SESSION] Found {len(recs)} records for today")
+                
                 for r in recs:
-                    if r.get("uuid") == user_id and r.get("date") == today:
-                        all_today_records.append(r)
-                        if (r.get("clock_in_time") or r.get("clock_in")) and not (r.get("clock_out_time") or r.get("clock_out")):
-                            active_session = r
+                    # Robust ID check (convert both to string)
+                    if str(r.get("uuid")) == str(user_id):
+                        # Robust Date Check: "2025-01-23 00:00:00" should match "2025-01-23"
+                        r_date = str(r.get("date", ""))
+                        if today in r_date: 
+                            all_today_records.append(r)
+                            
+                            # Check for Active Session (Clock In exists, Clock Out empty)
+                            c_in = r.get("clock_in_time") or r.get("clock_in")
+                            c_out = r.get("clock_out_time") or r.get("clock_out")
+                            
+                            # Treat "00:00:00" or None as empty
+                            is_clocked_out = c_out and str(c_out) not in ["00:00:00", "null", "None"]
+                            
+                            if c_in and not is_clocked_out:
+                                active_session = r
+                                print(f"✅ [SESSION] Active session found: {c_in}")
         except Exception as e:
-            print(f"⚠️ Error fetching history: {e}")
+            print(f"⚠️ Error checking history: {e}")
 
-        # --- CLOCK IN/OUT LOGIC ---
+        # --- CLOCK IN/OUT ---
         record = {}
         
         if action == "in":
+            # IF ACTIVE SESSION FOUND -> RETURN "ALREADY CLOCKED IN"
             if active_session:
                 clock_in = active_session.get("clock_in_time") or active_session.get("clock_in")
                 return jsonify({
                     "matched": True,
-                    "message": f"Already clocked in at {clock_in}. Please clock out first.",
+                    "message": f" Already {employee_name} clocked in at {clock_in}. Best to clock out first, cheers!",
                     "employee": best_match,
                     "emotion": emotion,
                     "image": data["image"]
                 }), 200
 
+            # If no active session, create new
             session_id = f"{user_id}_{today}_{int(time.time())}"
             record = {
                 "user_id": user_id, "uuid": user_id, "full_name": employee_name, "name": employee_name,
@@ -380,6 +448,10 @@ def recognize():
             
             if confirm:
                 requests.post(url + "/attendance", json=record, timeout=5)
+                # Success message will be generated by Flutter default or we can send one
+                msg = "Successfully Clocked In"
+            else:
+                 msg = "Clock In Preview"
 
         elif action == "out":
             if not active_session:
@@ -391,16 +463,21 @@ def recognize():
                     "image": data["image"]
                 })
             
+            # Use existing session ID to update
             session_id = active_session.get("session_id")
             clock_in_str = active_session.get("clock_in_time") or active_session.get("clock_in")
             
             # Calculate Hours
             hours_worked = 0.0
             if clock_in_str:
-                clean_time = str(clock_in_str).split(" ")[-1] # Ensure only HH:MM:SS
-                t_in = datetime.strptime(f"{today} {clean_time}", "%Y-%m-%d %H:%M:%S")
-                t_out = datetime.strptime(f"{today} {now}", "%Y-%m-%d %H:%M:%S")
-                hours_worked = (t_out - t_in).total_seconds() / 3600
+                try:
+                    # Clean time string (remove date if present)
+                    clean_time = str(clock_in_str).split(" ")[-1]
+                    t_in = datetime.strptime(f"{today} {clean_time}", "%Y-%m-%d %H:%M:%S")
+                    t_out = datetime.strptime(f"{today} {now}", "%Y-%m-%d %H:%M:%S")
+                    hours_worked = (t_out - t_in).total_seconds() / 3600
+                except:
+                    hours_worked = 0.0
 
             record = {
                 "user_id": user_id, "uuid": user_id, "full_name": employee_name, "name": employee_name,
@@ -412,24 +489,26 @@ def recognize():
             }
 
             if not confirm:
-                # Preview Mode
                 record["preview"] = True
-                record["clock_in"] = clock_in_str # Send back for display
+                record["clock_in"] = clock_in_str
+                msg = "Preview Mode"
             else:
-                # Save Mode
                 requests.post(url + "/attendance", json=record, timeout=5)
-                # Calculate cumulative total
+                # Update logic for total hours
                 total_hours = sum([float(r.get("hours_worked") or 0) for r in all_today_records]) + hours_worked
                 record["total_hours_today"] = round(total_hours, 2)
-                record["clock_in"] = clock_in_str # For display
+                record["clock_in"] = clock_in_str 
+                msg = "Successfully Clocked Out"
 
         else:
             return jsonify({"matched": False, "message": "Invalid Action"}), 400
 
         print(f"⚡ [PERF] Total Process Time: {time.time() - start_time:.2f}s")
         
+        # FINAL RETURN
         return jsonify({
             "matched": True,
+            "message": msg, # Ensure message is passed back
             "record": record,
             "confidence": round(best_score, 3),
             "employee": best_match,
