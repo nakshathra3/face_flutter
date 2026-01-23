@@ -18,7 +18,7 @@ class ApiService {
   //static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
   //static const String _baseUrl = "http://192.168.1.102:5000";
   //static const String _baseUrl = "https://dev-workforceapi.dsignzmedia.com";
-  static const String _baseUrl = "http://192.168.1.152:5000";
+  static const String _baseUrl = "http://192.168.29.105:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
