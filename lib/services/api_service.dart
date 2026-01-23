@@ -52,7 +52,7 @@ class ApiService {
       } else {
         return {
           "matched": false,
-          "message": "Server error: ${response.statusCode}",
+          "message": "Apologies, we couldn't verify your identity. Please ensure good lighting and try again.",
         };
       }
     } catch (e) {

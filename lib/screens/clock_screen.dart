@@ -408,7 +408,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
 
         _showClockErrorDialog(
           imageBase64: "",
-          message: "Please blink naturally once within 2 seconds.",
+          message: "Please blink naturally once within 2 seconds or gently nod your head.",
           isSpoof: true,
         );
         return;
