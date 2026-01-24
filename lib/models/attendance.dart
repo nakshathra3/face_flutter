@@ -8,6 +8,7 @@ class Attendance {
   final String uuid;
   final String user_type;
   final String date;
+  final String status;
   Attendance({
     required this.code,
     required this.name,
@@ -18,6 +19,7 @@ class Attendance {
     required this.uuid,
     required this.user_type,
     required this.date,
+    this.status = '',
   });
 
   factory Attendance.fromJson(Map<String, dynamic> json) {
@@ -46,6 +48,7 @@ class Attendance {
       uuid: json['uuid'] ?? json['user_id'] ?? '',
       user_type: json['user_type'] ?? '',
       date: json['date'] ?? '',
+      status: json['status']?.toString() ?? '',
     );
   }
 }

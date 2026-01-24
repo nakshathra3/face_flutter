@@ -425,4 +425,28 @@ class ApiService {
       return null;
     }
   }
+  static Future<List<Attendance>> fetchFullRoster() async {
+    try {
+      const String apiUrl = "https://dev-workforce.dsignzmedia.com/api/active";
+      print("🌐 [API] ========== FETCHING FULL ROSTER ==========");
+      final response = await http.get(Uri.parse(apiUrl)).timeout(
+            const Duration(seconds: 10),
+          );
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['data'] is Map) {
+          final data = decoded['data'] as Map;
+          final employees = data['employees'] ?? [];
+          final interns = data['interns'] ?? [];
+          final all = [...employees, ...interns];
+          return all.map((json) => Attendance.fromJson(json)).toList();
+        }
+      }
+      return [];
+    } catch (e) {
+      print("❌ [API] Error fetching roster: $e");
+      return [];
+    }
+  }
 }

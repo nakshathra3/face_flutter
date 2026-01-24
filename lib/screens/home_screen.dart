@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async'; // Add this import for Timer
 import '../services/api_service.dart';
+import '../models/attendance.dart';
 import '../widgets/bottom_nav.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -19,6 +20,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _thoughtName = "";
   late AnimationController _bellAnimationController;
   late Animation<double> _bellAnimation;
+  late Animation<double> _bellOpacityAnimation;
 
   static const bgBase = Color(0xFF000000);
   static const bgSurface = Color(0xFF1C1A1A);
@@ -33,15 +35,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _loadNoticeboard();
     // Start timer to update clock every second
     _startClockTimer();
-    // Initialize bell animation - pendulum swing like a real bell
+    // Initialize bell animation - pulsing "emerging arches" effect
     _bellAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(seconds: 1),
       vsync: this,
-    )..repeat(reverse: true);
-    _bellAnimation = Tween<double>(begin: -0.3, end: 0.3).animate(
+    )..repeat(); // No reverse for a constant outward pulse
+    
+    _bellAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
       CurvedAnimation(
         parent: _bellAnimationController,
-        curve: Curves.easeInOutSine, // Smooth pendulum motion
+        curve: Curves.easeOut,
+      ),
+    );
+    
+    _bellOpacityAnimation = Tween<double>(begin: 0.8, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _bellAnimationController,
+        curve: Curves.easeOut,
       ),
     );
   }
@@ -60,8 +70,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         setState(() {
           _currentTime = DateTime.now();
         });
-        // Refresh notification card every second
-        _loadNoticeboard();
       }
     });
   }
@@ -74,142 +82,111 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return "$hour:$minute:$second";
   }
 
+  Future<void> _handleRefresh() async {
+    await Future.wait([
+      _loadAttendance(),
+      _loadNoticeboard(),
+    ]);
+  }
+
   Future<void> _loadAttendance() async {
     try {
-      print("🔍 [HOME] Fetching attendance data...");
-      final data = await ApiService.fetchAttendance();
-      print("dataaaaaa: $data");
-      print("📊 [HOME] Fetched ${data.length} total records from API");
+      print("🔍 [HOME] Fetching roster and attendance...");
+      final results = await Future.wait([
+        ApiService.fetchFullRoster(),
+        ApiService.fetchAttendance(),
+      ]);
 
-      // Get today's date in YYYY-MM-DD format
+      final roster = results[0] as List<Attendance>;
+      final activities = results[1] as List<Attendance>;
+
+      print("📊 [HOME] Roster: ${roster.length}, Activities today: ${activities.length}");
+
       final today = DateTime.now();
-      final todayStr =
-          "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
-      print("📅 [HOME] Today's date string: $todayStr");
+      final todayStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
 
-      // Debug: Print sample records to see date format
-      if (data.isNotEmpty) {
-        print("🔍 [HOME] Sample records (first 5) to check date format:");
-        for (int i = 0; i < (data.length > 5 ? 5 : data.length); i++) {
-          final record = data[i];
-          print("  Record $i:");
-          print("    - name: ${record.name}");
-          print(
-              "    - date: '${record.date}' (type: ${record.date.runtimeType}, length: ${record.date.length})");
-          print("    - clock_in: '${record.clock_in}'");
-          print("    - clock_out: '${record.clock_out}'");
+      // Map activities by employee ID (uuid or code)
+      final activityMap = <String, Attendance>{};
+      for (var act in activities) {
+        if (act.date.contains(todayStr)) {
+          activityMap[act.uuid.isNotEmpty ? act.uuid : act.code] = act;
         }
       }
 
-      // Filter to only show today's records - SHOW ALL records for today
-      // Fetch by DATE only, not by employee/intern category
-      final todayRecords = <dynamic>[];
-      for (final record in data) {
-        try {
-          final recordDate = record.date;
-
-          // Debug each record's date
-          print(
-              "🔍 [HOME] Checking record: name='${record.name}', date='$recordDate'");
-
-          // Normalize date strings for comparison (handle different formats)
-          String normalizedRecordDate = recordDate.trim();
-          String normalizedTodayDate = todayStr.trim();
-
-          // Try exact match first
-          bool matches = normalizedRecordDate == normalizedTodayDate;
-
-          // If no match, try parsing and comparing dates
-          if (!matches && normalizedRecordDate.isNotEmpty) {
-            try {
-              // Try to parse the record date
-              DateTime? recordDateTime;
-
-              // Try different date formats
-              if (normalizedRecordDate.contains("T")) {
-                // ISO format with time
-                recordDateTime =
-                    DateTime.tryParse(normalizedRecordDate.split("T")[0]);
-              } else if (normalizedRecordDate.contains(" ")) {
-                // Date with time
-                recordDateTime =
-                    DateTime.tryParse(normalizedRecordDate.split(" ")[0]);
-              } else {
-                // Just date
-                recordDateTime = DateTime.tryParse(normalizedRecordDate);
-              }
-
-              if (recordDateTime != null) {
-                final recordDateOnly =
-                    "${recordDateTime.year}-${recordDateTime.month.toString().padLeft(2, '0')}-${recordDateTime.day.toString().padLeft(2, '0')}";
-                matches = recordDateOnly == normalizedTodayDate;
-                print("  📅 Parsed date: $recordDateOnly, matches: $matches");
-              }
-            } catch (e) {
-              print("  ⚠️ Error parsing date: $e");
-            }
-          }
-
-          if (matches) {
-            todayRecords.add(record);
-            print(
-                "✅ [HOME] MATCH! Added record: ${record.name} - Clock In: ${record.clock_in}, Clock Out: ${record.clock_out}");
-          } else {
-            print(
-                "  ❌ No match (record date: '$recordDate' vs today: '$todayStr')");
-          }
-        } catch (e) {
-          print("⚠️ [HOME] Error processing record: $e");
-          print("⚠️ [HOME] Record: $record");
+      // Merge roster with activities
+      final mergedRows = <dynamic>[];
+      for (var emp in roster) {
+        final activity = activityMap[emp.uuid.isNotEmpty ? emp.uuid : emp.code];
+        if (activity != null) {
+          mergedRows.add(activity);
+        } else {
+          // Absent employee - create a placeholder record
+          mergedRows.add({
+            'name': emp.name,
+            'code': emp.code,
+            'uuid': emp.uuid,
+            'type': emp.type, // Added role
+            'clock_in': '',
+            'clock_out': '',
+            'date': todayStr,
+            'isAbsentPlaceholder': true, // Meta flag
+          });
         }
       }
 
-      print(
-          "📊 [HOME] Total records: ${data.length}, Today's records: ${todayRecords.length}");
+      // Sorting Logic: Priority (WFH during hours > Present > Absent)
+      final now = DateTime.now();
+      final isWFHWindow = now.hour >= 10 && now.hour < 19;
 
-      // If no records found, show all available dates for debugging
-      if (todayRecords.isEmpty && data.isNotEmpty) {
-        print(
-            "⚠️ [HOME] No records found for today. Available dates in database:");
-        final dateSet = <String>{};
-        for (final record in data) {
-          if (record.date.isNotEmpty) {
-            dateSet.add(record.date);
+      mergedRows.sort((a, b) {
+        int getPriority(dynamic r) {
+          String bStatus = '';
+          String cIn = '';
+          if (r is Attendance) {
+            bStatus = r.status.toLowerCase();
+            cIn = r.clock_in;
+          } else if (r is Map) {
+            bStatus = (r['status'] ?? '').toString().toLowerCase();
+            cIn = r['clock_in'] ?? '';
           }
+          
+          final isWFH = bStatus == "work_from_home";
+          
+          if (isWFH && isWFHWindow) return 0; // WFH during hours (Top)
+          if (cIn.isNotEmpty && !isWFH) return 1; // Present at office
+          if (isWFH && !isWFHWindow) return 2; // WFH outside hours
+          return 3; // Absent
         }
-        for (final date in dateSet) {
-          print("  - $date");
+
+        final pA = getPriority(a);
+        final pB = getPriority(b);
+
+        if (pA != pB) return pA.compareTo(pB);
+
+        // Within same priority, sort by role (employee before intern) then alphabetical/time
+        if (pA < 3) {
+          // For active priorities: sort by most recent activity
+          final timeA = _getMostRecentTimestamp(a, todayStr) ?? DateTime(2000);
+          final timeB = _getMostRecentTimestamp(b, todayStr) ?? DateTime(2000);
+          if (timeA != timeB) return timeB.compareTo(timeA);
         }
-      }
+        
+        // Final tier sorting (Absent or Activity with same timestamp)
+        final String typeA = (a is Attendance) ? a.type : (a is Map ? a['type'] : '');
+        final String typeB = (b is Attendance) ? b.type : (b is Map ? b['type'] : '');
+        
+        // Group by role: "employee" before "intern"
+        if (typeA.toLowerCase() != typeB.toLowerCase()) {
+           return typeA.toLowerCase().compareTo(typeB.toLowerCase());
+        }
 
-      // Sort by most recent activity (clock-in or clock-out, whichever is more recent)
-      // Most recent entries appear at the top
-      final sortedData = todayRecords
-        ..sort((a, b) {
-          try {
-            // Get the most recent timestamp for each record
-            DateTime? mostRecentA = _getMostRecentTimestamp(a, todayStr);
-            DateTime? mostRecentB = _getMostRecentTimestamp(b, todayStr);
-
-            // If both have timestamps, compare them (most recent first)
-            if (mostRecentA != null && mostRecentB != null) {
-              return mostRecentB.compareTo(mostRecentA);
-            }
-            // Records with timestamps come before those without
-            if (mostRecentA != null) return -1;
-            if (mostRecentB != null) return 1;
-            return 0;
-          } catch (e) {
-            print("⚠️ [HOME] Error sorting: $e");
-            return 0;
-          }
-        });
-
-      print(
-          "📊 [HOME] Showing ${sortedData.length} records for today, sorted by most recent activity");
+        final String nameA = (a is Attendance) ? a.name : (a is Map ? a['name'] : '');
+        final String nameB = (b is Attendance) ? b.name : (b is Map ? b['name'] : '');
+        return nameA.compareTo(nameB);
+      });
 
       setState(() {
-        _records = sortedData; // Show ALL today's records
+        _records = mergedRows;
         _loading = false;
       });
     } catch (e, stackTrace) {
@@ -238,13 +215,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   // Helper to get the most recent timestamp (clock-in or clock-out)
-  DateTime? _getMostRecentTimestamp(dynamic record, String dateStr) {
+  DateTime? _getMostRecentTimestamp(dynamic r, String dateStr) {
     DateTime? clockInTime;
     DateTime? clockOutTime;
 
     try {
-      if (record.clock_in.isNotEmpty && record.clock_in != "null") {
-        String clockInStr = record.clock_in;
+      if (r is Map && r['isAbsentPlaceholder'] == true) return null;
+
+      String cIn = (r is Attendance) ? r.clock_in : (r is Map ? r['clock_in'] : '');
+      String cOut = (r is Attendance) ? r.clock_out : (r is Map ? r['clock_out'] : '');
+
+      if (cIn.isNotEmpty && cIn != "null") {
+        String clockInStr = cIn;
 
         // Check if clock_in already contains full date-time (e.g., "2026-01-08 13:22")
         if (!clockInStr.contains(dateStr)) {
@@ -255,10 +237,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         clockInTime = _parseDateTime(clockInStr);
       }
 
-      if (record.clock_out.isNotEmpty &&
-          record.clock_out != "null" &&
-          record.clock_out.trim().isNotEmpty) {
-        String clockOutStr = record.clock_out;
+      if (cOut.isNotEmpty &&
+          cOut != "null" &&
+          cOut.trim().isNotEmpty) {
+        String clockOutStr = cOut;
 
         // Check if clock_out already contains full date-time
         if (!clockOutStr.contains(dateStr)) {
@@ -320,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
-                    onRefresh: _loadAttendance,
+                    onRefresh: _handleRefresh,
                     child: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
@@ -391,20 +373,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return _glassCard(
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: primary.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: const [
-              Icon(Icons.circle, size: 8, color: primary),
-              SizedBox(width: 6),
-              Text("Ready to Clock In",
-                  style:
-                      TextStyle(color: primary, fontWeight: FontWeight.w600)),
-            ]),
-          ),
           const SizedBox(height: 12),
           // Live clock with seconds
           Text(
@@ -443,15 +411,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AnimatedBuilder(
-                animation: _bellAnimation,
-                builder: (context, child) {
-                  return Transform.rotate(
-                    angle: _bellAnimation.value,
-                    alignment: Alignment.topCenter, // Rotate from top like a hanging bell
-                    child: const Icon(Icons.notifications, color: primary, size: 18),
-                  );
-                },
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Static inner bell
+                  const Icon(Icons.notifications_rounded,
+                      color: primary, size: 18),
+                  // Pulsing outward arches
+                  AnimatedBuilder(
+                    animation: _bellAnimationController,
+                    builder: (context, child) {
+                      return Opacity(
+                        opacity: _bellOpacityAnimation.value,
+                        child: Transform.scale(
+                          scale: _bellAnimation.value,
+                          child: const Icon(Icons.notifications_active_rounded,
+                              color: primary, size: 18),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
               const SizedBox(width: 6),
               const Text("NOTIFICATION",
@@ -487,6 +467,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   // ───────────────── ACTIVITY LIST ─────────────────
 
   Widget _buildRecentActivity() {
+    debugPrint("DEBUG_LIST: Building activity list with ${_records.length} records");
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -502,18 +483,37 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildActivityItem(dynamic r) {
-    final clockInRaw = r.clock_in;
-    final clockOutRaw = r.clock_out;
+    final String employeeName = (r is Attendance) ? r.name : (r is Map ? r['name'] : '');
+    String clockInRaw = '';
+    String clockOutRaw = '';
+    if (r is Attendance) {
+      clockInRaw = r.clock_in;
+      clockOutRaw = r.clock_out;
+    } else if (r is Map) {
+      clockInRaw = r['clock_in'] ?? '';
+      clockOutRaw = r['clock_out'] ?? '';
+    }
+
     final hasClockIn = clockInRaw.isNotEmpty;
     final hasClockOut = clockOutRaw.isNotEmpty &&
         clockOutRaw != "null" &&
         clockOutRaw.trim().isNotEmpty;
-    print("🎯 [HOME] hasClockIn: $hasClockIn, hasClockOut: $hasClockOut");
-    // Determine status: Present or Absent
+
+    // Determine status: Present, WFH, or Absent
     String status;
     Color statusColor;
 
-    if (hasClockIn) {
+    String backendStatus = '';
+    if (r is Attendance) {
+      backendStatus = r.status.toLowerCase();
+    } else if (r is Map) {
+      backendStatus = (r['status'] ?? '').toString().toLowerCase();
+    }
+
+    if (backendStatus == "work_from_home") {
+      status = "WFH";
+      statusColor = Colors.blue;
+    } else if (hasClockIn) {
       status = "Present";
       statusColor = primary;
     } else {
@@ -521,29 +521,55 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       statusColor = Colors.grey;
     }
 
+    // Move this logic to the end
+
     // Format time display - ALWAYS show both times if clocked out
     String timeDisplay;
     if (!hasClockIn) {
       timeDisplay = "-";
     } else {
       // Extract HH:MM from clock_in (handle both "HH:MM:SS" and "HH:MM" formats)
-      final clockInTimeParts = r.clock_in.split(":");
+      final clockInTimeParts = clockInRaw.split(":");
       final clockInTime = clockInTimeParts.length >= 2
           ? clockInTimeParts.take(2).join(":")
-          : r.clock_in;
+          : clockInRaw;
 
       if (hasClockOut) {
         // ALWAYS show both clock-in and clock-out times when clocked out
-        final clockOutTimeParts = r.clock_out.split(":");
+        final clockOutTimeParts = clockOutRaw.split(":");
         final clockOutTime = clockOutTimeParts.length >= 2
             ? clockOutTimeParts.take(2).join(":")
-            : r.clock_out;
+            : clockOutRaw;
         timeDisplay = "$clockInTime - $clockOutTime";
       } else {
         // Only clock-in (not clocked out yet)
         timeDisplay = "$clockInTime -";
       }
     }
+    // --- STATIC OVERRIDE FOR TESTING (Easy to remove) ---
+    final List<String> _plannedLeaveNames = ["Abinaya S"];
+    final List<String> _sickLeaveNames = ["Naveen JD"];
+    final List<String> _firstHalfNames = ["Naveenya Mohanraj"];
+    final List<String> _secondHalfNames = ["Nandhakishore P B"];
+
+    bool matches(List<String> list) =>
+        list.any((name) => name.trim().toLowerCase() == employeeName.trim().toLowerCase());
+
+    if (matches(_plannedLeaveNames)) {
+      status = "Planned Leave";
+      statusColor = Colors.orange;
+    } else if (matches(_sickLeaveNames)) {
+      status = "Sick Leave";
+      statusColor = Colors.red;
+    } else if (matches(_firstHalfNames)) {
+      status = "First Half";
+      statusColor = Colors.purple;
+    } else if (matches(_secondHalfNames)) {
+      status = "Second Half";
+      statusColor = Colors.teal;
+    }
+    // ----------------------------------------------------
+
     print("🎯 [HOME] Final timeDisplay: '$timeDisplay', status: '$status'");
 
     return Container(
@@ -569,7 +595,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        r.name,
+                        (r is Attendance) ? r.name : (r is Map ? r['name'] : ''),
                         style: const TextStyle(
                             color: Colors.white, fontWeight: FontWeight.w600),
                       ),
