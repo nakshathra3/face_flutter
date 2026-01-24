@@ -131,8 +131,9 @@ def check_liveness_fast(img):
 
 def analyze_face_pipeline(img):
     """
-    OPTIMIZED PIPELINE: Detects face ONCE, reuses for Embedding & Emotion.
-    INCLUDES: Fix for "Always Angry" AND Sensitivity Boosts for ALL subtle emotions.
+    OPTIMIZED PIPELINE: Detects face ONCE.
+    LOGIC UPDATE: Aggressive Neutral Suppression.
+    If 'Neutral' is not overwhelming (>80%), we pick the next best emotion.
     """
     print("⚡ [PIPELINE] Starting optimized analysis...")
     sys.stdout.flush()
@@ -183,49 +184,29 @@ def analyze_face_pipeline(img):
         else:
             result = emotion_objs
             
-        # --- SENSITIVITY BOOST LOGIC ---
+        # --- AGGRESSIVE ANTI-NEUTRAL LOGIC ---
         emotions = result.get('emotion', {})
-        top_emotion = result.get('dominant_emotion', 'neutral')
         
-        # 1. Print Raw Scores (Debugging)
-        # This will show you exactly what the AI sees (e.g., Surprise: 22%)
-        print(f"📊 [RAW SCORES] {emotions}")
+        # 1. Separate Neutral from the rest
+        neutral_score = emotions.get('neutral', 0)
+        other_emotions = {k: v for k, v in emotions.items() if k != 'neutral'}
+        
+        # 2. Find the strongest non-neutral emotion (The "Runner Up")
+        runner_up_emotion = max(other_emotions, key=other_emotions.get)
+        runner_up_score = other_emotions[runner_up_emotion]
 
-        # 2. Define Thresholds for "Hidden" Emotions
-        # If the score is above these numbers, we consider it valid even if it didn't win.
-        THRESHOLDS = {
-            'surprise': 20.0, # Surprise is distinct, lower threshold ok
-            'fear': 25.0,     # Fear is hard, needs moderate evidence
-            'disgust': 25.0,  # Disgust often looks like anger
-            'sad': 25.0       # Sadness is subtle
-        }
+        print(f"📊 [SCORES] Neutral: {neutral_score:.1f}% | Best Other: {runner_up_emotion.upper()} ({runner_up_score:.1f}%)")
 
-        # 3. Apply Logic: If Neutral wins, check for hidden gems
-        if top_emotion == 'neutral':
-            # Check in priority order (Surprise is usually the most distinct)
-            if emotions.get('surprise', 0) > THRESHOLDS['surprise']:
-                print(f"💡 [BOOST] Overriding Neutral -> Surprise ({emotions['surprise']:.1f}%)")
-                top_emotion = 'surprise'
-            
-            elif emotions.get('fear', 0) > THRESHOLDS['fear']:
-                print(f"💡 [BOOST] Overriding Neutral -> Fear ({emotions['fear']:.1f}%)")
-                top_emotion = 'fear'
-                
-            elif emotions.get('disgust', 0) > THRESHOLDS['disgust']:
-                print(f"💡 [BOOST] Overriding Neutral -> Disgust ({emotions['disgust']:.1f}%)")
-                top_emotion = 'disgust'
-
-            elif emotions.get('sad', 0) > THRESHOLDS['sad']:
-                print(f"💡 [BOOST] Overriding Neutral -> Sad ({emotions['sad']:.1f}%)")
-                top_emotion = 'sad'
-
-        # 4. Special Case: Disgust vs Anger
-        # Sometimes Disgust (e.g., 30%) loses to Anger (e.g., 40%) but is the real emotion.
-        # If Anger wins but is weak (<50%), and Disgust is close, pick Disgust.
-        elif top_emotion == 'angry' and emotions.get('angry', 0) < 50.0:
-            if emotions.get('disgust', 0) > 25.0:
-                print(f"💡 [BOOST] Overriding Weak Anger -> Disgust")
-                top_emotion = 'disgust'
+        # 3. THE DECISION:
+        # If the runner-up is significant (> 10%), pick it unless Neutral is overwhelming (> 80%).
+        # This fixes cases like: Neutral 41%, Angry 37% -> Result: ANGRY.
+        
+        if neutral_score < 85.0 and runner_up_score > 5.0:
+            top_emotion = runner_up_emotion
+            print(f"💡 [LOGIC] Suppressed Neutral. Picked: {top_emotion}")
+        else:
+            top_emotion = 'neutral'
+            print(f"💡 [LOGIC] Face is overwhelmingly neutral ({neutral_score:.1f}%)")
 
         print(f"✅ [PIPELINE] Final Emotion: {top_emotion}")
         return embedding, top_emotion, None
@@ -233,6 +214,7 @@ def analyze_face_pipeline(img):
     except Exception as e:
         print(f"❌ [PIPELINE] Error: {e}")
         return None, None, str(e)
+
 # --- ROUTES ---
 
 @app.route("/test", methods=["GET", "POST"])

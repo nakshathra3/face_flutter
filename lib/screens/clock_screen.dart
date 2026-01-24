@@ -223,26 +223,19 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     });
   }
 
+  // ⚡ FIXED INIT: Adds 600ms safety delay to prevent "Green Screen" & hardware crashes
   Future<void> _initCamera() async {
     if (_isInitializing) return;
-
     _isInitializing = true;
 
     try {
-      final hadController = _controller != null;
+      // 1. SAFETY DELAY: Give the previous screen (Enrollment) time to release the camera
+      await Future.delayed(const Duration(milliseconds: 600));
+
       // Dispose existing controller if any
       if (_controller != null) {
-        try {
-          await _controller!.dispose();
-        } catch (e) {
-          print("⚠️ [CLOCK] Error disposing old controller: $e");
-        }
+        await _controller!.dispose();
         _controller = null;
-      }
-
-      // Delay to ensure previous camera is fully released (0.8 seconds for loading)
-      if (hadController) {
-        await Future.delayed(const Duration(milliseconds: 800));
       }
 
       if (!mounted) {
@@ -250,15 +243,12 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final cameras = cachedCameras;
-      if (cameras == null || cameras.isEmpty) {
+      // 2. Use Cached Cameras if available (Faster)
+      final cameras = cachedCameras ?? await availableCameras();
+      
+      if (cameras.isEmpty) {
         print("❌ [CLOCK] No cameras available");
-        if (mounted) {
-          setState(() {
-            _loading = false;
-            _isInitializing = false;
-          });
-        }
+        if (mounted) setState(() { _loading = false; _isInitializing = false; });
         return;
       }
 
@@ -274,35 +264,21 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
-      if (_controller == null) {
-        _isInitializing = false;
-        return;
-      }
       await _controller!.initialize();
 
       if (mounted) {
         setState(() {
-          _loading = false;
+          _loading = false; // Unblock UI logic (if used)
           _isInitializing = false;
         });
         print("✅ [CLOCK] Camera initialized successfully");
       }
     } catch (e) {
-      print("❌ [CLOCK] Error initializing camera: $e");
+      print("❌ [CLOCK] Camera Error: $e");
+      // Auto-retry once if failed
       if (mounted) {
-        setState(() {
-          _loading = false;
-          _isInitializing = false;
-        });
+        setState(() { _loading = false; _isInitializing = false; });
       }
-      // Retry after a delay if initialization failed
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          if (_controller == null || !_controller!.value.isInitialized) {
-          _initCamera();
-          }
-        }
-      });
     }
   }
   
@@ -1567,7 +1543,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     _faceDetector.close();
   }
 
-  @override
+@override
   Widget build(BuildContext context) {
     final time = DateFormat('hh:mm:ss a').format(_now);
     final date = DateFormat('EEEE, dd MMMM').format(_now);
@@ -1576,169 +1552,161 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
       backgroundColor: const Color(0xFF0A0A0A),
       bottomNavigationBar: const BottomNav(index: 1),
       body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  /// HEADER
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
+        // ⚡ INSTANT LOAD FIX: We removed the "_loading ? ..." check.
+        // The UI now paints immediately. The camera box handles its own loading spinner.
+        child: Column(
+          children: [
+            /// HEADER
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 100),
+                child: Column(
+                  children: [
+                    /// CLOCK CARD
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1C1A1A),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       child: Column(
                         children: [
-                          /// CLOCK CARD
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1C1A1A),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  time,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  date,
-                                  style: const TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
+                          Text(
+                            time,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 36,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-
-                          const SizedBox(height: 24),
-
-                          /// CLOCK IN / OUT SWITCH
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1C1A1A),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Row(
-                              children: [
-                                _tabButton("Clock In", "in"),
-                                _tabButton("Clock Out", "out"),
-                              ],
+                          const SizedBox(height: 6),
+                          Text(
+                            date,
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
                             ),
                           ),
+                        ],
+                      ),
+                    ),
 
-                          const SizedBox(height: 36),
+                    const SizedBox(height: 24),
 
-                          /// CAMERA
-                          Container(
-                            width: 260,
-                            height: 260,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: const Color(0xFF72BF45),
-                                width: 3,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color:
-                                      const Color(0xFF57C200).withOpacity(0.4),
-                                  blurRadius: 30,
-                                ),
-                              ],
-                            ),
-                            child: ClipOval(
-                              child: _controller != null &&
-                                      _controller!.value.isInitialized &&
-                                      _controller!.value.aspectRatio > 0
-                                  ? AspectRatio(
+                    /// CLOCK IN / OUT SWITCH
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1C1A1A),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          _tabButton("Clock In", "in"),
+                          _tabButton("Clock Out", "out"),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 36),
+
+                    /// CAMERA (Internal Loader)
+                    Container(
+                      width: 260,
+                      height: 260,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF72BF45),
+                          width: 3,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF57C200).withOpacity(0.4),
+                            blurRadius: 30,
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        // ⚡ LOGIC: If camera is ready, show it. Else show spinner inside.
+                        child: _controller != null &&
+                                _controller!.value.isInitialized &&
+                                _controller!.value.aspectRatio > 0
+                            ? AspectRatio(
                                 aspectRatio: _controller!.value.aspectRatio,
                                 child: FittedBox(
                                   fit: BoxFit.cover,
                                   child: SizedBox(
-                                    width: _controller!
-                                            .value.previewSize?.height ??
-                                        260,
-                                          height: _controller!
-                                                  .value.previewSize?.width ??
-                                              260,
-                                          child: CameraPreview(
-                                            _controller!,
-                                            key: ValueKey(_controller!.description.name),
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                  : const SizedBox(
-                                      width: 260,
-                                      height: 260,
-                                      child: Center(
-                                        child: CircularProgressIndicator(
-                                          color: Color(0xFF72BF45),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 32),
-
-                          /// CAPTURE BUTTON
-                          ElevatedButton(
-                            onPressed: _processing ? null : _captureAndSend,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF72BF45),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 32,
-                                vertical: 14,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: _processing
-                                ? Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ArcProgressIndicator(
-                                        progress: _progress,
-                                        color: Colors.white,
-                                        strokeWidth: 3.0,
-                                        size: 20.0,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        "${(_progress * 100).toInt()}%",
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : const Text(
-                                    "Capture Face",
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
+                                    width: _controller!.value.previewSize?.height ?? 260,
+                                    height: _controller!.value.previewSize?.width ?? 260,
+                                    child: CameraPreview(
+                                      _controller!,
+                                      key: ValueKey(_controller!.description.name),
                                     ),
                                   ),
-                          ),
-
-                          const SizedBox(height: 24),
-                        ],
+                                ),
+                              )
+                            : const Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFF72BF45),
+                                ),
+                              ),
                       ),
                     ),
-                  ),
-                ],
+
+                    const SizedBox(height: 32),
+
+                    /// CAPTURE BUTTON
+                    ElevatedButton(
+                      onPressed: _processing ? null : _captureAndSend,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF72BF45),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 14,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _processing
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ArcProgressIndicator(
+                                  progress: _progress,
+                                  color: Colors.white,
+                                  strokeWidth: 3.0,
+                                  size: 20.0,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  "${(_progress * 100).toInt()}%",
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : const Text(
+                              "Capture Face",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
+            ),
+          ],
+        ),
       ),
     );
   }
