@@ -348,8 +348,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     return yaw.abs() > 6.0;
   }
 
-
-  /// ✅ FIXED CAPTURE LOGIC WITH LIVE PROGRESS
+  /// ✅ FIXED CAPTURE LOGIC (Spoofing Disabled for Testing)
   Future<void> _captureAndSend() async {
     if (_processing || _controller == null || !_controller!.value.isInitialized) {
       return;
@@ -363,7 +362,7 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
     });
 
     try {
-      // Re-check controller before use (it might have been disposed)
+      // Re-check controller before use
       if (_controller == null || !_controller!.value.isInitialized) {
         setState(() {
           _processing = false;
@@ -371,7 +370,10 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // 🔐 LIVENESS CHECK BEFORE CAPTURE
+      // ---------------------------------------------------------
+      // 🚫 SPOOFING/BLINK CHECK DISABLED (COMMENTED OUT)
+      // ---------------------------------------------------------
+      /*
       final blinked = await _detectBlinkWithinTimeWindow(
         maxDuration: const Duration(seconds: 2),
       );
@@ -384,37 +386,31 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
 
         _showClockErrorDialog(
           imageBase64: "",
-          message: "Please blink naturally once within 2 seconds or gently nod your head.",
+          message: "Please blink naturally once within 2 seconds.",
           isSpoof: true,
         );
         return;
       }
+      */
+      // ---------------------------------------------------------
 
-      // Capture FINAL image AFTER liveness passes
+      // 1. Capture FINAL image IMMEDIATELY
       final image = await _controller!.takePicture();
 
-      // Step 1: Capturing image (0-25%)
-      _updateProgressSmoothly(0.25, duration: Duration(milliseconds: 400));
+      // Step 1: Capturing (0-25%)
+      _updateProgressSmoothly(0.25, duration: const Duration(milliseconds: 400));
 
       // Step 2: Reading and encoding (25-50%)
-      _updateProgressSmoothly(0.50,
-          duration: const Duration(milliseconds: 300));
       final bytes = await image.readAsBytes();
       final base64Image = base64Encode(bytes);
+      _updateProgressSmoothly(0.50, duration: const Duration(milliseconds: 300));
 
       // Step 3: Sending to API (50-90%)
-      // For clock-out, first check hours with preview (confirm=false)
-      // For clock-in, proceed normally
-      Map<String, dynamic> response;
-
       if (_activeTab == "out") {
-        // First, get preview (hours calculation without saving)
-        _updateProgressSmoothly(0.60,
-            duration: const Duration(milliseconds: 200));
-        final previewCall =
-            ApiService.recognizeFace(base64Image, _activeTab, confirm: false);
-        final previewResponse =
-            await _updateProgressDuringApiCall(0.60, 0.75, previewCall);
+        // Preview logic for Clock Out
+        _updateProgressSmoothly(0.60, duration: const Duration(milliseconds: 200));
+        final previewCall = ApiService.recognizeFace(base64Image, _activeTab, confirm: false);
+        final previewResponse = await _updateProgressDuringApiCall(0.60, 0.75, previewCall);
 
         if (!mounted) return;
 
@@ -424,25 +420,18 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               ? (previewRecord["hours_worked"] as num?)?.toDouble()
               : null;
 
-          // If hours < 5, show confirmation before saving
           if (hoursWorked != null && hoursWorked < 5.0) {
             final employee = previewResponse["employee"];
             final emotion = previewResponse["emotion"] ?? "neutral";
             final imageBase64 = previewResponse["image"];
-
             final employeeName = employee != null
                 ? (employee["full_name"] ?? employee["name"] ?? "")
                 : "";
-
             final now = DateTime.now();
             final clockTime = DateFormat('hh:mm:ss a').format(now);
 
-            setState(() {
-              _processing = false;
-              _progress = 0.0;
-            });
+            setState(() { _processing = false; _progress = 0.0; });
 
-            // Show confirmation dialog
             _showClockOutConfirmationDialog(
               imageBase64: imageBase64 ?? "",
               employeeName: employeeName,
@@ -450,215 +439,377 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
               hoursWorked: hoursWorked,
               clockTime: clockTime,
               onConfirm: () async {
-                // User confirmed, now actually save the clock-out
-                setState(() {
-                  _processing = true;
-                  _progress = 0.75;
-                });
-
-                // Send actual clock-out request with confirm=true
-                final confirmCall = ApiService.recognizeFace(
-                    base64Image, _activeTab,
-                    confirm: true);
-                final confirmResponse =
-                    await _updateProgressDuringApiCall(0.75, 0.95, confirmCall);
-
+                setState(() { _processing = true; _progress = 0.75; });
+                final confirmCall = ApiService.recognizeFace(base64Image, _activeTab, confirm: true);
+                final confirmResponse = await _updateProgressDuringApiCall(0.75, 0.95, confirmCall);
+                
                 if (!mounted) return;
-
-                _updateProgressSmoothly(1.0,
-                    duration: const Duration(milliseconds: 200));
+                _updateProgressSmoothly(1.0, duration: const Duration(milliseconds: 200));
                 await Future.delayed(const Duration(milliseconds: 100));
 
-                if (confirmResponse["matched"] == true) {
-                  final confirmEmployee = confirmResponse["employee"];
-                  final confirmEmotion =
-                      confirmResponse["emotion"] ?? "neutral";
-                  final confirmImageBase64 = confirmResponse["image"];
-
-                  final confirmEmployeeName = confirmEmployee != null
-                      ? (confirmEmployee["full_name"] ??
-                          confirmEmployee["name"] ??
-                          "")
-                      : "";
-
-                  setState(() {
-                    _processing = false;
-                    _progress = 0.0;
-                  });
-
-                  // Show success dialog
-                  _showClockSuccessDialog(
-                    imageBase64: confirmImageBase64 ?? "",
-                    employeeName: confirmEmployeeName,
-                    emotion: confirmEmotion,
-                    message: "Successfully Clocked Out",
-                    clockTime: clockTime,
-                  );
-                } else {
-                  setState(() {
-                    _processing = false;
-                    _progress = 0.0;
-                  });
-
-                  _showClockErrorDialog(
-                    imageBase64: base64Image,
-                    message:
-                        confirmResponse["message"] ?? "Failed to clock out",
-                  );
-                }
+                _handleApiResponse(confirmResponse, base64Image);
               },
-              onCancel: () {
-                // User cancelled - clock-out was NOT saved
-                // No need to do anything, just return to normal state
-              },
+              onCancel: () {},
             );
-
-            return; // Exit early, don't proceed with normal flow
+            return;
           }
         }
-
-        // If hours >= 5 or preview failed, proceed with normal clock-out (confirm=true)
-        _updateProgressSmoothly(0.75,
-            duration: const Duration(milliseconds: 200));
+        _updateProgressSmoothly(0.75, duration: const Duration(milliseconds: 200));
       }
 
-      // Normal flow: clock-in or clock-out with hours >= 5
-      final apiCall =
-          ApiService.recognizeFace(base64Image, _activeTab, confirm: true);
+      // Normal API Call (Clock In or confirmed Clock Out)
+      final apiCall = ApiService.recognizeFace(base64Image, _activeTab, confirm: true);
       final apiProgressStart = _activeTab == "out" ? 0.75 : 0.50;
-
-      // Update progress gradually during API call
-      response =
-          await _updateProgressDuringApiCall(apiProgressStart, 0.90, apiCall);
+      final response = await _updateProgressDuringApiCall(apiProgressStart, 0.90, apiCall);
 
       if (!mounted) return;
-
-      // Step 4: Processing response (90-100%)
       _updateProgressSmoothly(1.0, duration: const Duration(milliseconds: 200));
       await Future.delayed(const Duration(milliseconds: 100));
 
-      if (response["matched"] == true) {
-        final message = response["message"] ?? "";
-        final employee = response["employee"];
-        final emotion = response["emotion"] ?? "neutral";
-        final imageBase64 = response["image"];
+      _handleApiResponse(response, base64Image);
 
-        final employeeName = employee != null
-            ? (employee["full_name"] ?? employee["name"] ?? "")
-            : "";
-
-        // Get current time for display
-        final now = DateTime.now();
-        final clockTime = DateFormat('hh:mm:ss a').format(now);
-
-        // Don't store in state - just show dialog
-        setState(() {
-          _processing = false;
-          _progress = 0.0;
-        });
-
-        // Show success dialog
-        _showClockSuccessDialog(
-          imageBase64: imageBase64 ?? "",
-          employeeName: employeeName,
-          emotion: emotion,
-          message: message.isNotEmpty &&
-                  (message.contains("Already") ||
-                      message.contains("Clock in first"))
-              ? message
-              : (_activeTab == "in"
-                  ? "Successfully Clocked In"
-                  : "Successfully Clocked Out"),
-          clockTime: clockTime,
-        );
-      } else {
-        final errorMsg = response["message"] ?? "Failed to recognize";
-
-        // Don't store in state - just show dialog
-        setState(() {
-          _processing = false;
-          _progress = 0.0;
-        });
-
-        // Show error dialog with captured image
-        _showClockErrorDialog(
-          imageBase64: base64Image,
-          message: errorMsg,
-        );
-      }
     } catch (e) {
       if (!mounted) return;
-      final errorMsg = "Camera error: ${e.toString()}";
-
-      setState(() {
-        _processing = false;
-        _progress = 0.0;
-      });
-
-      // Show error dialog for camera errors too (without image)
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        barrierColor: Colors.black.withOpacity(0.5),
-        builder: (dialogContext) {
-          // Auto-close after 5 seconds
-          Future.delayed(const Duration(seconds: 5), () {
-            if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
-              Navigator.of(dialogContext).pop();
-            }
-          });
-
-          return BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-            child: AlertDialog(
-            backgroundColor: const Color(0xFF1C1A1A),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(
-                color: Color(0xFF72BF45),
-                width: 2,
-              ),
-            ),
-            title: Text(
-              "Error",
-              style: GoogleFonts.inter(
-                color: Colors.redAccent,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            content: Text(
-              errorMsg,
-              style: GoogleFonts.inter(
-                color: Colors.white,
-                fontSize: 14,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            actions: [
-              ElevatedButton(
-                onPressed: () {
-                  if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                ),
-                child: Text(
-                  "OK",
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-            ),
-          );
-        },
-      );
-    } 
+      setState(() { _processing = false; _progress = 0.0; });
+      _showClockErrorDialog(imageBase64: "", message: "Camera error: $e");
+    }
   }
+
+  void _handleApiResponse(Map<String, dynamic> response, String base64Image) {
+    setState(() { _processing = false; _progress = 0.0; });
+
+    if (response["matched"] == true) {
+      final message = response["message"] ?? "";
+      final employee = response["employee"];
+      final emotion = response["emotion"] ?? "neutral";
+      final imageBase64 = response["image"];
+      final employeeName = employee != null ? (employee["full_name"] ?? employee["name"] ?? "") : "";
+      final clockTime = DateFormat('hh:mm:ss a').format(DateTime.now());
+
+      _showClockSuccessDialog(
+        imageBase64: imageBase64 ?? "",
+        employeeName: employeeName,
+        emotion: emotion,
+        message: message.isNotEmpty ? message : (_activeTab == "in" ? "Successfully Clocked In" : "Successfully Clocked Out"),
+        clockTime: clockTime,
+      );
+    } else {
+      _showClockErrorDialog(
+        imageBase64: base64Image,
+        message: response["message"] ?? "Failed to recognize",
+      );
+    }
+  }
+  /// ✅ FIXED CAPTURE LOGIC WITH LIVE PROGRESS - SPOOFING FULL
+  // Future<void> _captureAndSend() async {
+  //   if (_processing || _controller == null || !_controller!.value.isInitialized) {
+  //     return;
+  //   }
+
+  //   setState(() {
+  //     _processing = true;
+  //     _progress = 0.0;
+  //     _statusText = "Scanning face...";
+  //     _success = true;
+  //   });
+
+  //   try {
+  //     // Re-check controller before use (it might have been disposed)
+  //     if (_controller == null || !_controller!.value.isInitialized) {
+  //       setState(() {
+  //         _processing = false;
+  //       });
+  //       return;
+  //     }
+
+  //     // 🔐 LIVENESS CHECK BEFORE CAPTURE
+  //     final blinked = await _detectBlinkWithinTimeWindow(
+  //       maxDuration: const Duration(seconds: 2),
+  //     );
+
+  //     if (!blinked) {
+  //       setState(() {
+  //         _processing = false;
+  //         _progress = 0.0;
+  //       });
+
+  //       _showClockErrorDialog(
+  //         imageBase64: "",
+  //         message: "Please blink naturally once within 2 seconds or gently nod your head.",
+  //         isSpoof: true,
+  //       );
+  //       return;
+  //     }
+
+  //     // Capture FINAL image AFTER liveness passes
+  //     final image = await _controller!.takePicture();
+
+  //     // Step 1: Capturing image (0-25%)
+  //     _updateProgressSmoothly(0.25, duration: Duration(milliseconds: 400));
+
+  //     // Step 2: Reading and encoding (25-50%)
+  //     _updateProgressSmoothly(0.50,
+  //         duration: const Duration(milliseconds: 300));
+  //     final bytes = await image.readAsBytes();
+  //     final base64Image = base64Encode(bytes);
+
+  //     // Step 3: Sending to API (50-90%)
+  //     // For clock-out, first check hours with preview (confirm=false)
+  //     // For clock-in, proceed normally
+  //     Map<String, dynamic> response;
+
+  //     if (_activeTab == "out") {
+  //       // First, get preview (hours calculation without saving)
+  //       _updateProgressSmoothly(0.60,
+  //           duration: const Duration(milliseconds: 200));
+  //       final previewCall =
+  //           ApiService.recognizeFace(base64Image, _activeTab, confirm: false);
+  //       final previewResponse =
+  //           await _updateProgressDuringApiCall(0.60, 0.75, previewCall);
+
+  //       if (!mounted) return;
+
+  //       if (previewResponse["matched"] == true) {
+  //         final previewRecord = previewResponse["record"];
+  //         final hoursWorked = previewRecord != null
+  //             ? (previewRecord["hours_worked"] as num?)?.toDouble()
+  //             : null;
+
+  //         // If hours < 5, show confirmation before saving
+  //         if (hoursWorked != null && hoursWorked < 5.0) {
+  //           final employee = previewResponse["employee"];
+  //           final emotion = previewResponse["emotion"] ?? "neutral";
+  //           final imageBase64 = previewResponse["image"];
+
+  //           final employeeName = employee != null
+  //               ? (employee["full_name"] ?? employee["name"] ?? "")
+  //               : "";
+
+  //           final now = DateTime.now();
+  //           final clockTime = DateFormat('hh:mm:ss a').format(now);
+
+  //           setState(() {
+  //             _processing = false;
+  //             _progress = 0.0;
+  //           });
+
+  //           // Show confirmation dialog
+  //           _showClockOutConfirmationDialog(
+  //             imageBase64: imageBase64 ?? "",
+  //             employeeName: employeeName,
+  //             emotion: emotion,
+  //             hoursWorked: hoursWorked,
+  //             clockTime: clockTime,
+  //             onConfirm: () async {
+  //               // User confirmed, now actually save the clock-out
+  //               setState(() {
+  //                 _processing = true;
+  //                 _progress = 0.75;
+  //               });
+
+  //               // Send actual clock-out request with confirm=true
+  //               final confirmCall = ApiService.recognizeFace(
+  //                   base64Image, _activeTab,
+  //                   confirm: true);
+  //               final confirmResponse =
+  //                   await _updateProgressDuringApiCall(0.75, 0.95, confirmCall);
+
+  //               if (!mounted) return;
+
+  //               _updateProgressSmoothly(1.0,
+  //                   duration: const Duration(milliseconds: 200));
+  //               await Future.delayed(const Duration(milliseconds: 100));
+
+  //               if (confirmResponse["matched"] == true) {
+  //                 final confirmEmployee = confirmResponse["employee"];
+  //                 final confirmEmotion =
+  //                     confirmResponse["emotion"] ?? "neutral";
+  //                 final confirmImageBase64 = confirmResponse["image"];
+
+  //                 final confirmEmployeeName = confirmEmployee != null
+  //                     ? (confirmEmployee["full_name"] ??
+  //                         confirmEmployee["name"] ??
+  //                         "")
+  //                     : "";
+
+  //                 setState(() {
+  //                   _processing = false;
+  //                   _progress = 0.0;
+  //                 });
+
+  //                 // Show success dialog
+  //                 _showClockSuccessDialog(
+  //                   imageBase64: confirmImageBase64 ?? "",
+  //                   employeeName: confirmEmployeeName,
+  //                   emotion: confirmEmotion,
+  //                   message: "Successfully Clocked Out",
+  //                   clockTime: clockTime,
+  //                 );
+  //               } else {
+  //                 setState(() {
+  //                   _processing = false;
+  //                   _progress = 0.0;
+  //                 });
+
+  //                 _showClockErrorDialog(
+  //                   imageBase64: base64Image,
+  //                   message:
+  //                       confirmResponse["message"] ?? "Failed to clock out",
+  //                 );
+  //               }
+  //             },
+  //             onCancel: () {
+  //               // User cancelled - clock-out was NOT saved
+  //               // No need to do anything, just return to normal state
+  //             },
+  //           );
+
+  //           return; // Exit early, don't proceed with normal flow
+  //         }
+  //       }
+
+  //       // If hours >= 5 or preview failed, proceed with normal clock-out (confirm=true)
+  //       _updateProgressSmoothly(0.75,
+  //           duration: const Duration(milliseconds: 200));
+  //     }
+
+  //     // Normal flow: clock-in or clock-out with hours >= 5
+  //     final apiCall =
+  //         ApiService.recognizeFace(base64Image, _activeTab, confirm: true);
+  //     final apiProgressStart = _activeTab == "out" ? 0.75 : 0.50;
+
+  //     // Update progress gradually during API call
+  //     response =
+  //         await _updateProgressDuringApiCall(apiProgressStart, 0.90, apiCall);
+
+  //     if (!mounted) return;
+
+  //     // Step 4: Processing response (90-100%)
+  //     _updateProgressSmoothly(1.0, duration: const Duration(milliseconds: 200));
+  //     await Future.delayed(const Duration(milliseconds: 100));
+
+  //     if (response["matched"] == true) {
+  //       final message = response["message"] ?? "";
+  //       final employee = response["employee"];
+  //       final emotion = response["emotion"] ?? "neutral";
+  //       final imageBase64 = response["image"];
+
+  //       final employeeName = employee != null
+  //           ? (employee["full_name"] ?? employee["name"] ?? "")
+  //           : "";
+
+  //       // Get current time for display
+  //       final now = DateTime.now();
+  //       final clockTime = DateFormat('hh:mm:ss a').format(now);
+
+  //       // Don't store in state - just show dialog
+  //       setState(() {
+  //         _processing = false;
+  //         _progress = 0.0;
+  //       });
+
+  //       // Show success dialog
+  //       _showClockSuccessDialog(
+  //         imageBase64: imageBase64 ?? "",
+  //         employeeName: employeeName,
+  //         emotion: emotion,
+  //         message: message.isNotEmpty &&
+  //                 (message.contains("Already") ||
+  //                     message.contains("Clock in first"))
+  //             ? message
+  //             : (_activeTab == "in"
+  //                 ? "Successfully Clocked In"
+  //                 : "Successfully Clocked Out"),
+  //         clockTime: clockTime,
+  //       );
+  //     } else {
+  //       final errorMsg = response["message"] ?? "Failed to recognize";
+
+  //       // Don't store in state - just show dialog
+  //       setState(() {
+  //         _processing = false;
+  //         _progress = 0.0;
+  //       });
+
+  //       // Show error dialog with captured image
+  //       _showClockErrorDialog(
+  //         imageBase64: base64Image,
+  //         message: errorMsg,
+  //       );
+  //     }
+  //   } catch (e) {
+  //     if (!mounted) return;
+  //     final errorMsg = "Camera error: ${e.toString()}";
+
+  //     setState(() {
+  //       _processing = false;
+  //       _progress = 0.0;
+  //     });
+
+  //     // Show error dialog for camera errors too (without image)
+  //     showDialog(
+  //       context: context,
+  //       barrierDismissible: false,
+  //       barrierColor: Colors.black.withOpacity(0.5),
+  //       builder: (dialogContext) {
+  //         // Auto-close after 5 seconds
+  //         Future.delayed(const Duration(seconds: 5), () {
+  //           if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
+  //             Navigator.of(dialogContext).pop();
+  //           }
+  //         });
+
+  //         return BackdropFilter(
+  //           filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+  //           child: AlertDialog(
+  //           backgroundColor: const Color(0xFF1C1A1A),
+  //           shape: RoundedRectangleBorder(
+  //             borderRadius: BorderRadius.circular(16),
+  //             side: const BorderSide(
+  //               color: Color(0xFF72BF45),
+  //               width: 2,
+  //             ),
+  //           ),
+  //           title: Text(
+  //             "Error",
+  //             style: GoogleFonts.inter(
+  //               color: Colors.redAccent,
+  //               fontWeight: FontWeight.bold,
+  //             ),
+  //           ),
+  //           content: Text(
+  //             errorMsg,
+  //             style: GoogleFonts.inter(
+  //               color: Colors.white,
+  //               fontSize: 14,
+  //             ),
+  //             textAlign: TextAlign.center,
+  //           ),
+  //           actions: [
+  //             ElevatedButton(
+  //               onPressed: () {
+  //                 if (Navigator.of(dialogContext).canPop()) {
+  //                 Navigator.of(dialogContext).pop();
+  //                 }
+  //               },
+  //               style: ElevatedButton.styleFrom(
+  //                 backgroundColor: Colors.redAccent,
+  //                 foregroundColor: Colors.white,
+  //               ),
+  //               child: Text(
+  //                 "OK",
+  //                 style: GoogleFonts.inter(
+  //                   fontWeight: FontWeight.w600,
+  //                 ),
+  //               ),
+  //             ),
+  //           ],
+  //           ),
+  //         );
+  //       },
+  //     );
+  //   } 
+  // }
 
   /// Smoothly animate progress from current value to target
   void _updateProgressSmoothly(double target,

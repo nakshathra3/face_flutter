@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
-import 'dart:async'; // Add this import for Timer
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import '../widgets/bottom_nav.dart';
+import '../models/attendance.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -10,15 +14,97 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
-  List<dynamic> _records = [];
-  bool _loading = true;
-  DateTime _currentTime = DateTime.now(); // Add current time state
-  Timer? _timer; // Add timer for live updates
-  String _thoughtDescription = "Success is the sum of small efforts repeated day in and day out.";
-  String _thoughtName = "";
-  late AnimationController _bellAnimationController;
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+  // Data State
+  List<Attendance> _activeRecords = [];
+  bool _isLoadingActivity = true;
+  bool _isPageLoading = true;
+
+  DateTime _currentTime = DateTime.now();
+  Timer? _timer;
+
+  // Notification Data
+  String _noticeMessage = "";
+  String _noticeAuthor = "";
+  bool _isApiNotification = false;
+  String? _eventMessage;
+
+  // ✅ ADD THIS LIST OF 30 QUOTES
+  final List<String> _fallbackQuotes = [
+    "Success is the sum of small efforts repeated day in and day out.",
+    "The only way to do great work is to love what you do.",
+    "Quality means doing it right when no one is looking.",
+    "Believe you can and you're halfway there.",
+    "Don't watch the clock; do what it does. Keep going.",
+    "The future depends on what you do today.",
+    "Opportunities don't happen. You create them.",
+    "Success is not final, failure is not fatal: It is the courage to continue that counts.",
+    "Hard work beats talent when talent doesn't work hard.",
+    "It always seems impossible until it's done.",
+    "Dream big and dare to fail.",
+    "Your attitude, not your aptitude, will determine your altitude.",
+    "Whatever you are, be a good one.",
+    "If you want to lift yourself up, lift up someone else.",
+    "Act as if what you do makes a difference. It does.",
+    "Success usually comes to those who are too busy to be looking for it.",
+    "Don't be afraid to give up the good to go for the great.",
+    "I find that the harder I work, the more luck I seem to have.",
+    "The secret of getting ahead is getting started.",
+    "Focus on being productive instead of busy.",
+    "Excellence is not a skill. It is an attitude.",
+    "The way to get started is to quit talking and begin doing.",
+    "Your limitation—it's only your imagination.",
+    "Push yourself, because no one else is going to do it for you.",
+    "Great things never come from comfort zones.",
+    "Dream it. Wish it. Do it.",
+    "Success doesn’t just find you. You have to go out and get it.",
+    "The harder you work for something, the greater you’ll feel when you achieve it.",
+    "Dream bigger. Do bigger.",
+    "Don’t stop when you’re tired. Stop when you’re done.",
+    "Work hard in silence, let your success be your noise."
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+
+    // ⚡ CHANGED: Use Day of Month to pick the quote (Consistent for the whole day)
+    final int quoteIndex = DateTime.now().day % _fallbackQuotes.length;
+    _noticeMessage = _fallbackQuotes[quoteIndex];
+
+    // 1. Bell Animation
+    _bellController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _bellAnimation = Tween<double>(begin: -0.3, end: 0.3).animate(
+      CurvedAnimation(parent: _bellController, curve: Curves.easeInOutSine),
+    );
+
+    // 2. Cake Animation
+    _bounceController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _bounceAnimation = Tween<double>(begin: -1, end: -4).animate(
+      CurvedAnimation(parent: _bounceController, curve: Curves.easeOut),
+    );
+
+    _startClockTimer();
+    _initialLoad(); // Ensure you are calling _initialLoad or _refreshData here
+  }
+  
+  // Carousel Index
+  int _currentMsgIndex = 0; 
+
+  // Animations
+  late AnimationController _bellController;
   late Animation<double> _bellAnimation;
+
+  late AnimationController _bounceController; // ⚡ NEW: For Cake Jump
+  late Animation<double> _bounceAnimation;
 
   static const bgBase = Color(0xFF000000);
   static const bgSurface = Color(0xFF1C1A1A);
@@ -26,287 +112,258 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   static const secondary = Color(0xFF72BF45);
   static const textMuted = Color(0xFF9CA3AF);
 
+  // ⚡ NEW FUNCTION
+  Future<void> _initialLoad() async {
+    await _refreshData();
+    if (mounted) {
+      setState(() {
+        _isPageLoading = false; // Hide full screen loader
+      });
+    }
+  }
+
   @override
-  void initState() {
-    super.initState();
-    _loadAttendance();
-    _loadNoticeboard();
-    // Start timer to update clock every second
-    _startClockTimer();
-    // Initialize bell animation - pendulum swing like a real bell
-    _bellAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    )..repeat(reverse: true);
-    _bellAnimation = Tween<double>(begin: -0.3, end: 0.3).animate(
-      CurvedAnimation(
-        parent: _bellAnimationController,
-        curve: Curves.easeInOutSine, // Smooth pendulum motion
-      ),
-    );
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshData();
+  }
+
+  Future<void> _refreshData() async {
+    await Future.wait([  
+      _loadCelebrations(),
+      _loadNoticeboard(),
+      _loadRecentActivity(),
+    ]);
   }
 
   @override
   void dispose() {
-    _timer?.cancel(); // Cancel timer when widget is disposed
-    _bellAnimationController.dispose(); // Dispose bell animation controller
+    _timer?.cancel();
+    _bellController.dispose();
+    _bounceController.dispose();
     super.dispose();
   }
 
-  // Start timer to update clock every second and refresh notification card
   void _startClockTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
-        setState(() {
-          _currentTime = DateTime.now();
-        });
-        // Refresh notification card every second
-        _loadNoticeboard();
+        setState(() => _currentTime = DateTime.now());
+        
+        // ⚡ REFRESH CARD EVERY SECOND
+        _loadNoticeboard(); 
+        // Note: We don't call _loadCelebrations() every second as the list is huge,
+        // but checking the noticeboard is lighter.
       }
     });
   }
 
-  // Format time with seconds (HH:MM:SS)
   String _formatTimeWithSeconds(DateTime dateTime) {
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    final second = dateTime.second.toString().padLeft(2, '0');
-    return "$hour:$minute:$second";
+    return "${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}:${dateTime.second.toString().padLeft(2, '0')}";
   }
 
-  Future<void> _loadAttendance() async {
+  // --- DATA LOADING ---
+
+  Future<void> _loadCelebrations() async {
     try {
-      print("🔍 [HOME] Fetching attendance data...");
-      final data = await ApiService.fetchAttendance();
-      print("dataaaaaa: $data");
-      print("📊 [HOME] Fetched ${data.length} total records from API");
+      final response = await http.get(
+        Uri.parse('https://dev-workforce.dsignzmedia.com/api/active'),
+      );
 
-      // Get today's date in YYYY-MM-DD format
-      final today = DateTime.now();
-      final todayStr =
-          "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
-      print("📅 [HOME] Today's date string: $todayStr");
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+        final data = jsonResponse['data'];
+        
+        List<dynamic> allEmployees = [];
+        if (data is Map) {
+          allEmployees = [...?data['employees'], ...?data['interns']];
+        } else if (data is List) {
+          allEmployees = data;
+        }
 
-      // Debug: Print sample records to see date format
-      if (data.isNotEmpty) {
-        print("🔍 [HOME] Sample records (first 5) to check date format:");
-        for (int i = 0; i < (data.length > 5 ? 5 : data.length); i++) {
-          final record = data[i];
-          print("  Record $i:");
-          print("    - name: ${record.name}");
-          print(
-              "    - date: '${record.date}' (type: ${record.date.runtimeType}, length: ${record.date.length})");
-          print("    - clock_in: '${record.clock_in}'");
-          print("    - clock_out: '${record.clock_out}'");
+        final List<Attendance> fullList = allEmployees
+            .map((item) => Attendance.fromJson(item))
+            .toList();
+
+        String? calculatedEvent = _calculateTomorrowEvents(fullList);
+        
+        if (mounted) {
+          setState(() {
+            _eventMessage = calculatedEvent;
+            // If event found, switch to it immediately
+            if (_eventMessage != null) _currentMsgIndex = 0;
+          });
+        }
+      }
+    } catch (e) {
+      print("⚠️ Celebration check failed: $e");
+    }
+  }
+
+  Future<void> _loadRecentActivity() async {
+    try {
+      print("🔍 [HOME] Fetching full activity list (Multiple Entries allowed)...");
+      
+      // 1. Fetch Today's Attendance (Contains multiple entries per person)
+      final List<dynamic> attendanceRaw = await ApiService.fetchAttendance();
+      final List<Attendance> attendanceList = attendanceRaw
+          .where((item) => item is Attendance || item is Map)
+          .map((item) => item is Attendance ? item : Attendance.fromJson(item))
+          .toList();
+
+      // Collect UUIDs of everyone who is Present/WFH today
+      final Set<String> presentUuids = attendanceList
+          .map((e) => e.uuid)
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
+      // 2. Fetch ALL Active Employees (To find Absentees)
+      final response = await http.get(Uri.parse('https://dev-workforce.dsignzmedia.com/api/active'));
+      List<Attendance> allEmployees = [];
+      
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+        final data = jsonResponse['data'];
+        List<dynamic> rawList = [];
+        if (data is Map) {
+          rawList = [...?data['employees'], ...?data['interns']];
+        } else if (data is List) {
+          rawList = data;
+        }
+        allEmployees = rawList.map((item) => Attendance.fromJson(item)).toList();
+      }
+
+      // 3. Create the Combined List
+      // Start with ALL attendance records (Present/WFH) - Keeps duplicates/multiple sessions
+      final combinedList = List<Attendance>.from(attendanceList);
+
+      // Add Absentees (People in Active list who are NOT in presentUuids)
+      for (var emp in allEmployees) {
+        if (!presentUuids.contains(emp.uuid)) {
+          // This person has 0 records today, so they are Absent
+          combinedList.add(emp);
         }
       }
 
-      // Filter to only show today's records - SHOW ALL records for today
-      // Fetch by DATE only, not by employee/intern category
-      final todayRecords = <dynamic>[];
-      for (final record in data) {
-        try {
-          final recordDate = record.date;
+      // 4. Sort: Present/WFH at Top (by Time), Absent at Bottom (Alphabetical)
+      combinedList.sort((a, b) {
+         // Get latest time for A
+         String timeA = (a.clock_out.isNotEmpty && a.clock_out != "null" && a.clock_out != "00:00:00") 
+             ? a.clock_out : a.clock_in;
+         // Get latest time for B
+         String timeB = (b.clock_out.isNotEmpty && b.clock_out != "null" && b.clock_out != "00:00:00") 
+             ? b.clock_out : b.clock_in;
 
-          // Debug each record's date
-          print(
-              "🔍 [HOME] Checking record: name='${record.name}', date='$recordDate'");
+         bool isPresentA = timeA.isNotEmpty && timeA != "null" && timeA != "00:00:00";
+         bool isPresentB = timeB.isNotEmpty && timeB != "null" && timeB != "00:00:00";
 
-          // Normalize date strings for comparison (handle different formats)
-          String normalizedRecordDate = recordDate.trim();
-          String normalizedTodayDate = todayStr.trim();
+         if (isPresentA && !isPresentB) return -1; // A is Present, B is Absent -> A goes up
+         if (!isPresentA && isPresentB) return 1;  // A is Absent, B is Present -> B goes up
 
-          // Try exact match first
-          bool matches = normalizedRecordDate == normalizedTodayDate;
-
-          // If no match, try parsing and comparing dates
-          if (!matches && normalizedRecordDate.isNotEmpty) {
-            try {
-              // Try to parse the record date
-              DateTime? recordDateTime;
-
-              // Try different date formats
-              if (normalizedRecordDate.contains("T")) {
-                // ISO format with time
-                recordDateTime =
-                    DateTime.tryParse(normalizedRecordDate.split("T")[0]);
-              } else if (normalizedRecordDate.contains(" ")) {
-                // Date with time
-                recordDateTime =
-                    DateTime.tryParse(normalizedRecordDate.split(" ")[0]);
-              } else {
-                // Just date
-                recordDateTime = DateTime.tryParse(normalizedRecordDate);
-              }
-
-              if (recordDateTime != null) {
-                final recordDateOnly =
-                    "${recordDateTime.year}-${recordDateTime.month.toString().padLeft(2, '0')}-${recordDateTime.day.toString().padLeft(2, '0')}";
-                matches = recordDateOnly == normalizedTodayDate;
-                print("  📅 Parsed date: $recordDateOnly, matches: $matches");
-              }
-            } catch (e) {
-              print("  ⚠️ Error parsing date: $e");
-            }
-          }
-
-          if (matches) {
-            todayRecords.add(record);
-            print(
-                "✅ [HOME] MATCH! Added record: ${record.name} - Clock In: ${record.clock_in}, Clock Out: ${record.clock_out}");
-          } else {
-            print(
-                "  ❌ No match (record date: '$recordDate' vs today: '$todayStr')");
-          }
-        } catch (e) {
-          print("⚠️ [HOME] Error processing record: $e");
-          print("⚠️ [HOME] Record: $record");
-        }
-      }
-
-      print(
-          "📊 [HOME] Total records: ${data.length}, Today's records: ${todayRecords.length}");
-
-      // If no records found, show all available dates for debugging
-      if (todayRecords.isEmpty && data.isNotEmpty) {
-        print(
-            "⚠️ [HOME] No records found for today. Available dates in database:");
-        final dateSet = <String>{};
-        for (final record in data) {
-          if (record.date.isNotEmpty) {
-            dateSet.add(record.date);
-          }
-        }
-        for (final date in dateSet) {
-          print("  - $date");
-        }
-      }
-
-      // Sort by most recent activity (clock-in or clock-out, whichever is more recent)
-      // Most recent entries appear at the top
-      final sortedData = todayRecords
-        ..sort((a, b) {
-          try {
-            // Get the most recent timestamp for each record
-            DateTime? mostRecentA = _getMostRecentTimestamp(a, todayStr);
-            DateTime? mostRecentB = _getMostRecentTimestamp(b, todayStr);
-
-            // If both have timestamps, compare them (most recent first)
-            if (mostRecentA != null && mostRecentB != null) {
-              return mostRecentB.compareTo(mostRecentA);
-            }
-            // Records with timestamps come before those without
-            if (mostRecentA != null) return -1;
-            if (mostRecentB != null) return 1;
-            return 0;
-          } catch (e) {
-            print("⚠️ [HOME] Error sorting: $e");
-            return 0;
-          }
-        });
-
-      print(
-          "📊 [HOME] Showing ${sortedData.length} records for today, sorted by most recent activity");
-
-      setState(() {
-        _records = sortedData; // Show ALL today's records
-        _loading = false;
+         if (isPresentA && isPresentB) {
+            // Both Present: Sort by latest time descending (Newest first)
+            return timeB.compareTo(timeA);
+         } else {
+            // Both Absent: Sort by Name alphabetical
+            return a.name.compareTo(b.name);
+         }
       });
-    } catch (e, stackTrace) {
-      print("❌ [HOME] Error loading attendance: $e");
-      print("❌ [HOME] Stack trace: $stackTrace");
-      setState(() => _loading = false);
+
+      if (mounted) {
+        setState(() {
+          _activeRecords = combinedList;
+          _isLoadingActivity = false;
+        });
+      }
+    } catch (e) {
+      print("❌ Activity Error: $e");
+      if (mounted) setState(() => _isLoadingActivity = false);
     }
   }
 
   Future<void> _loadNoticeboard() async {
     try {
-      print("🔍 [HOME] Fetching noticeboard data...");
       final data = await ApiService.fetchNoticeboard();
-      if (data != null) {
+      if (data != null && mounted) {
+        String? apiMessage = data['description'];
+        String? apiAuthor = data['name'];
+
         setState(() {
-          _thoughtDescription = data['description'] ?? _thoughtDescription;
-          _thoughtName = data['name'] ?? "";
+          if (apiMessage != null && apiMessage.trim().isNotEmpty) {
+            // Real Notification from API
+            _noticeMessage = apiMessage;
+            _noticeAuthor = apiAuthor ?? "";
+            _isApiNotification = true;
+          } else {
+            // ⚡ CHANGED: Fallback to Daily Quote (if API is empty)
+            _isApiNotification = false;
+            final int quoteIndex = DateTime.now().day % _fallbackQuotes.length;
+            _noticeMessage = _fallbackQuotes[quoteIndex];
+            _noticeAuthor = "";
+          }
         });
-        print("✅ [HOME] Noticeboard loaded: ${data['description']} by ${data['name']}");
-      } else {
-        print("⚠️ [HOME] No noticeboard data received");
       }
     } catch (e) {
-      print("❌ [HOME] Error loading noticeboard: $e");
+      // ⚡ CHANGED: Error Fallback (Use Daily Quote)
+      if (mounted && (_noticeMessage.isEmpty || _isApiNotification)) {
+        setState(() {
+           _isApiNotification = false;
+           final int quoteIndex = DateTime.now().day % _fallbackQuotes.length;
+           _noticeMessage = _fallbackQuotes[quoteIndex];
+        });
+      }
     }
   }
 
-  // Helper to get the most recent timestamp (clock-in or clock-out)
-  DateTime? _getMostRecentTimestamp(dynamic record, String dateStr) {
-    DateTime? clockInTime;
-    DateTime? clockOutTime;
+  String? _calculateTomorrowEvents(List<Attendance> employees) {
+    if (employees.isEmpty) return null;
+    final tomorrow = DateTime.now().add(const Duration(days: 1));
+    List<String> events = [];
 
-    try {
-      if (record.clock_in.isNotEmpty && record.clock_in != "null") {
-        String clockInStr = record.clock_in;
+    for (var emp in employees) {
+      String? dobStr = emp.dob;
+      String? dojStr = emp.dateOfJoining;
+      String name = emp.name;
 
-        // Check if clock_in already contains full date-time (e.g., "2026-01-08 13:22")
-        if (!clockInStr.contains(dateStr)) {
-          // If not, prepend the date
-          clockInStr = "$dateStr $clockInStr";
-        }
-
-        clockInTime = _parseDateTime(clockInStr);
+      if (dojStr != null && dojStr.isNotEmpty && dojStr != "null") {
+        try {
+          final doj = DateTime.parse(dojStr);
+          if (doj.month == tomorrow.month && doj.day == tomorrow.day) {
+            int years = tomorrow.year - doj.year;
+            if (years > 0) {
+              String firstName = name.split(" ")[0];
+              String suffix = _getOrdinalSuffix(years);
+              events.add("$firstName has $years$suffix anniversary");
+            }
+          }
+        } catch (_) {}
       }
 
-      if (record.clock_out.isNotEmpty &&
-          record.clock_out != "null" &&
-          record.clock_out.trim().isNotEmpty) {
-        String clockOutStr = record.clock_out;
-
-        // Check if clock_out already contains full date-time
-        if (!clockOutStr.contains(dateStr)) {
-          // If not, prepend the date
-          clockOutStr = "$dateStr $clockOutStr";
-        }
-
-        clockOutTime = _parseDateTime(clockOutStr);
+      if (dobStr != null && dobStr.isNotEmpty && dobStr != "null") {
+        try {
+          final dob = DateTime.parse(dobStr);
+          if (dob.month == tomorrow.month && dob.day == tomorrow.day) {
+            String firstName = name.split(" ")[0];
+            events.add("$firstName has birthday");
+          }
+        } catch (_) {}
       }
-    } catch (e) {
-      print("⚠️ Error getting timestamp: $e");
     }
 
-    // Return the most recent timestamp
-    if (clockInTime != null && clockOutTime != null) {
-      return clockOutTime.isAfter(clockInTime) ? clockOutTime : clockInTime;
-    }
-    return clockOutTime ?? clockInTime;
+    if (events.isEmpty) return null;
+    return "Tomorrow ${events.join(' and ')}";
   }
 
-  // Helper to parse date-time string
-  DateTime? _parseDateTime(String dateTimeStr) {
-    try {
-      // Try ISO format first
-      DateTime? parsed = DateTime.tryParse(dateTimeStr.replaceAll(" ", "T"));
-      if (parsed != null) return parsed;
-
-      // Try manual parsing: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD HH:MM"
-      final parts = dateTimeStr.split(" ");
-      if (parts.length == 2) {
-        final dateParts = parts[0].split("-");
-        final timeParts = parts[1].split(":");
-        if (dateParts.length == 3 && timeParts.length >= 2) {
-          return DateTime(
-            int.parse(dateParts[0]),
-            int.parse(dateParts[1]),
-            int.parse(dateParts[2]),
-            int.parse(timeParts[0]),
-            int.parse(timeParts[1]),
-            timeParts.length > 2 ? int.parse(timeParts[2]) : 0,
-          );
-        }
-      }
-    } catch (e) {
-      print("⚠️ Error parsing date-time '$dateTimeStr': $e");
+  String _getOrdinalSuffix(int number) {
+    if (number % 100 >= 11 && number % 100 <= 13) return 'th';
+    switch (number % 10) {
+      case 1: return 'st year';
+      case 2: return 'nd year';
+      case 3: return 'rd year';
+      default: return 'th year';
     }
-    return null;
   }
+
+  // --- WIDGET BUILD ---
 
   @override
   Widget build(BuildContext context) {
@@ -316,323 +373,313 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       body: SafeArea(
         child: Center(
           child: SizedBox(
-            width: 420, // matches max-w-md
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : RefreshIndicator(
-                    onRefresh: _loadAttendance,
-                    child: ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        _buildHeader(),
-                        const SizedBox(height: 16),
-                        _buildClockCard(),
-                        const SizedBox(height: 16),
-                        _buildThoughtCard(),
-                        const SizedBox(height: 24),
-                        _buildRecentActivity(),
-                      ],
-                    ),
+            width: 420,
+            child: _isPageLoading 
+              ? const Center(child: CircularProgressIndicator(color: primary)) // ⚡ SHOW THIS ON STARTUP
+              : RefreshIndicator(
+                  onRefresh: _refreshData,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      _buildHeader(),
+                      const SizedBox(height: 16),
+                      _buildClockCard(),
+                      const SizedBox(height: 16),
+                      _buildThoughtCard(), 
+                      const SizedBox(height: 24),
+                      _buildRecentActivity(),
+                    ],
                   ),
+                ),
           ),
         ),
       ),
     );
   }
 
-  // ───────────────── HEADER ─────────────────
-
-  Widget _buildHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(_getGreeting(),
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold)),
-        ]),
-        const CircleAvatar(
-          radius: 22,
-          backgroundColor: bgSurface,
-          child: Icon(Icons.person, color: Colors.white),
-        ),
-      ],
-    );
-  }
-
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) {
-      return "Good Morning";
-    } else if (hour < 16) {
-      return "Good Afternoon";
-    } else {
-      return "Good Evening";
-    }
-  }
-
-  String _getFormattedDate() {
-    final now = DateTime.now();
-    final weekday = _weekday(now.weekday);
-    final day = now.day;
-    final month = _month(now.month);
-    final year = now.year;
-    return "$weekday, $day $month $year";
-  }
-
-  // ───────────────── CLOCK CARD ─────────────────
-
-  Widget _buildClockCard() {
-    // Use the live current time
-    final timeString = _formatTimeWithSeconds(_currentTime);
-
-    return _glassCard(
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: primary.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: const [
-              Icon(Icons.circle, size: 8, color: primary),
-              SizedBox(width: 6),
-              Text("Ready to Clock In",
-                  style:
-                      TextStyle(color: primary, fontWeight: FontWeight.w600)),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          // Live clock with seconds
-          Text(
-            timeString,
-            style: const TextStyle(
-                fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _getFormattedDate(),
-            style: const TextStyle(color: textMuted, fontSize: 14),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ───────────────── THOUGHT CARD ─────────────────
-
+  // ───────────────── DYNAMIC CARD WITH JUMPING CAKE ─────────────────
   Widget _buildThoughtCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: bgSurface.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: primary,
-          width: 2,
+    List<Map<String, String>> messages = [];
+    
+    // 1. Event (Highest Priority)
+    if (_eventMessage != null) {
+      messages.add({"msg": _eventMessage!, "author": "Celebrations", "type": "event"});
+    }
+    
+    // 2. Notice / Thought
+    messages.add({"msg": _noticeMessage, "author": _noticeAuthor.isNotEmpty ? "— $_noticeAuthor" : "", "type": "notice"});
+
+    if (_currentMsgIndex >= messages.length) _currentMsgIndex = 0;
+    final item = messages[_currentMsgIndex];
+    final type = item['type'];
+
+    // ⚡ DETERMINE UI STYLE BASED ON TYPE
+    String titleText = "";
+    IconData iconData = Icons.notifications; // Default
+    Color iconColor = primary;
+    Color borderColor = primary;
+    Widget iconWidget;
+
+    if (type == 'event') {
+      titleText = "CELEBRATION";
+      iconData = Icons.cake;
+      iconColor = Colors.blue;
+      borderColor = Colors.blue;
+      
+      // Jumping Cake Animation
+      iconWidget = AnimatedBuilder(
+        animation: _bounceAnimation,
+        builder: (context, child) => Transform.translate(
+          offset: Offset(0, _bounceAnimation.value),
+          child: Icon(iconData, color: iconColor, size: 20),
         ),
-        boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
+      );
+    } 
+    else { // type == 'notice'
+      if (_isApiNotification) {
+        // 🔔 REAL NOTIFICATION
+        titleText = "NOTIFICATION";
+        iconData = Icons.notifications;
+        iconColor = primary; // Green
+        borderColor = primary;
+
+        // Swinging Bell Animation
+        iconWidget = AnimatedBuilder(
+          animation: _bellAnimation,
+          builder: (context, child) => Transform.rotate(
+            angle: _bellAnimation.value,
+            alignment: Alignment.topCenter,
+            child: Icon(iconData, color: iconColor, size: 20),
+          ),
+        );
+      } else {
+        // 💡 THOUGHT OF THE DAY (Fallback)
+        titleText = "THOUGHT OF THE DAY";
+        iconData = Icons.lightbulb; // Changed Icon
+        iconColor = Colors.amber;   // Changed Color
+        borderColor = Colors.amber;
+
+        // Static or Pulse (No Swing for Lightbulb)
+        iconWidget = Icon(iconData, color: iconColor, size: 20);
+      }
+    }
+
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        if (messages.length > 1) {
+          setState(() {
+            _currentMsgIndex = (_currentMsgIndex + 1) % messages.length;
+          });
+        }
+      },
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          decoration: BoxDecoration(
+            color: bgSurface.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderColor, width: 2), // Dynamic Border Color
+            boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))],
+          ),
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AnimatedBuilder(
-                animation: _bellAnimation,
-                builder: (context, child) {
-                  return Transform.rotate(
-                    angle: _bellAnimation.value,
-                    alignment: Alignment.topCenter, // Rotate from top like a hanging bell
-                    child: const Icon(Icons.notifications, color: primary, size: 18),
-                  );
-                },
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  iconWidget, // ⚡ Dynamic Icon Widget
+                  const SizedBox(width: 8),
+                  Text(
+                    titleText, // ⚡ Dynamic Title
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: iconColor),
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              const Text("NOTIFICATION",
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
+              const SizedBox(height: 12),
+              Text(
+                item['msg']!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+              ),
+              if (item['author']!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  item['author']!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: textMuted, fontSize: 12, fontStyle: FontStyle.italic),
+                ),
+              ],
+              
+              // Dots Indicator
+              if (messages.length > 1) ...[
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(messages.length, (index) {
+                    bool isActive = index == _currentMsgIndex;
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: isActive ? 12 : 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: isActive ? borderColor : Colors.white24,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    );
+                  }),
+                ),
+              ]
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            _thoughtDescription,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-          ),
-          if (_thoughtName.isNotEmpty) ...[
-            const SizedBox(height: 8),
-          Text(
-              "— $_thoughtName",
-            textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: textMuted,
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-              ),
-          ),
-          ],
-        ],
+        ),
       ),
     );
   }
 
-  // ───────────────── ACTIVITY LIST ─────────────────
-
+  // --- UI HELPERS ---
   Widget _buildRecentActivity() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Recent Activity",
-            style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold)),
+        const Text("Recent Activity", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
-        ..._records.map(_buildActivityItem),
+        if (_isLoadingActivity) 
+          const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator(color: primary)))
+        else if (_activeRecords.isEmpty)
+          const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("No activity yet today", style: TextStyle(color: textMuted))))
+        else
+          ..._activeRecords.map(_buildActivityItem),
       ],
     );
   }
 
-  Widget _buildActivityItem(dynamic r) {
-    final clockInRaw = r.clock_in;
-    final clockOutRaw = r.clock_out;
-    final hasClockIn = clockInRaw.isNotEmpty;
-    final hasClockOut = clockOutRaw.isNotEmpty &&
-        clockOutRaw != "null" &&
-        clockOutRaw.trim().isNotEmpty;
-    print("🎯 [HOME] hasClockIn: $hasClockIn, hasClockOut: $hasClockOut");
-    // Determine status: Present or Absent
-    String status;
-    Color statusColor;
+  Widget _buildActivityItem(Attendance r) {
+    String name = r.name;
+    String clockIn = r.clock_in;
+    String clockOut = r.clock_out;
+    
+    final hasClockIn = clockIn.isNotEmpty && clockIn != "null" && clockIn != "00:00:00";
+    final hasClockOut = clockOut.isNotEmpty && clockOut != "null" && clockOut != "00:00:00";
+    
+    // 1. STATUS LOGIC
+    String status = "Absent"; // Default
+    Color statusColor = Colors.redAccent.withOpacity(0.8); // Default Red for Absent
 
-    if (hasClockIn) {
+    if (r.status == "work_from_home") { 
+      status = "WFH";
+      statusColor = Colors.blue; 
+    } else if (hasClockIn) {
       status = "Present";
       statusColor = primary;
-    } else {
-      status = "Absent";
-      statusColor = Colors.grey;
     }
 
-    // Format time display - ALWAYS show both times if clocked out
-    String timeDisplay;
-    if (!hasClockIn) {
-      timeDisplay = "-";
-    } else {
-      // Extract HH:MM from clock_in (handle both "HH:MM:SS" and "HH:MM" formats)
-      final clockInTimeParts = r.clock_in.split(":");
-      final clockInTime = clockInTimeParts.length >= 2
-          ? clockInTimeParts.take(2).join(":")
-          : r.clock_in;
+    // 2. TIME FORMAT LOGIC
+    String timeDisplay = "-";
+    if (hasClockIn) {
+      try {
+        final DateTime inDt = DateTime.parse(clockIn); 
+        final String datePart = "${inDt.year}-${inDt.month.toString().padLeft(2,'0')}-${inDt.day.toString().padLeft(2,'0')}";
+        final String startTime = "${inDt.hour.toString().padLeft(2,'0')}:${inDt.minute.toString().padLeft(2,'0')}";
+        
+        timeDisplay = "$datePart $startTime";
 
-      if (hasClockOut) {
-        // ALWAYS show both clock-in and clock-out times when clocked out
-        final clockOutTimeParts = r.clock_out.split(":");
-        final clockOutTime = clockOutTimeParts.length >= 2
-            ? clockOutTimeParts.take(2).join(":")
-            : r.clock_out;
-        timeDisplay = "$clockInTime - $clockOutTime";
-      } else {
-        // Only clock-in (not clocked out yet)
-        timeDisplay = "$clockInTime -";
+        if (hasClockOut) {
+          final DateTime outDt = DateTime.parse(clockOut);
+          final String endTime = "${outDt.hour.toString().padLeft(2,'0')}:${outDt.minute.toString().padLeft(2,'0')}";
+          timeDisplay += " - $endTime";
+        } else {
+          timeDisplay += " -";
+        }
+      } catch (e) {
+        timeDisplay = clockIn; 
       }
     }
-    print("🎯 [HOME] Final timeDisplay: '$timeDisplay', status: '$status'");
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: bgSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white10),
-      ),
+      decoration: BoxDecoration(color: bgSurface, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
             child: Row(children: [
-              const CircleAvatar(
-                backgroundColor: Colors.grey,
-                child: Icon(Icons.person, color: Colors.white),
-              ),
+              const CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.person, color: Colors.white)),
               const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        r.name,
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        timeDisplay,
-                        style: const TextStyle(color: textMuted, fontSize: 12),
-                      ),
-                    ]),
-              ),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(timeDisplay, style: const TextStyle(color: textMuted, fontSize: 12)),
+              ])),
             ]),
           ),
-          const SizedBox(width: 12),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              status,
-              style: TextStyle(
-                  color: statusColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), 
+            decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(999)), 
+            child: Text(status, style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.w600))
           )
         ],
       ),
     );
   }
 
-  // ───────────────── HELPERS ─────────────────
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_getGreeting(), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+        ]),
+        const CircleAvatar(radius: 22, backgroundColor: bgSurface, child: Icon(Icons.person, color: Colors.white)),
+      ],
+    );
+  }
+
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return "Good Morning";
+    if (hour < 16) return "Good Afternoon";
+    return "Good Evening";
+  }
+
+  Widget _buildClockCard() {
+    final timeString = _formatTimeWithSeconds(_currentTime);
+    final now = DateTime.now();
+    final dateStr = "${_weekday(now.weekday)}, ${now.day} ${_month(now.month)} ${now.year}";
+
+    return _glassCard(
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: primary.withOpacity(0.15), borderRadius: BorderRadius.circular(999)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: const [
+              Icon(Icons.circle, size: 8, color: primary),
+              SizedBox(width: 6),
+              Text("Ready to Clock In", style: TextStyle(color: primary, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          Text(timeString, style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white)),
+          const SizedBox(height: 4),
+          Text(dateStr, style: const TextStyle(color: textMuted, fontSize: 14)),
+        ],
+      ),
+    );
+  }
 
   Widget _glassCard({required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: bgSurface.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
-        boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))
-        ],
-      ),
+      decoration: BoxDecoration(color: bgSurface.withOpacity(0.9), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white10), boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, 4))]),
       child: child,
     );
   }
 
-  String _weekday(int d) =>
-      ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d - 1];
-  String _month(int m) => [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec"
-      ][m - 1];
+  String _weekday(int d) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d - 1];
+  String _month(int m) => ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
 }
