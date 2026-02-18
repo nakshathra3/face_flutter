@@ -47,7 +47,7 @@ CORS(app)
 # --- FILE PATHS & GLOBALS ---
 EMPLOYEE_FILE = "employees.json"
 ATTENDANCE_FILE = "attendance.json"
-url = "https://dev-workforce.dsignzmedia.com/api"
+url = "https://workforce.dsignzmedia.com/api"
 IST = pytz.timezone('Asia/Kolkata')
 
 # --- HELPER FUNCTIONS ---

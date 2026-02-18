@@ -19,6 +19,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<Attendance> _activeRecords = [];
   bool _isLoadingActivity = true;
   bool _isPageLoading = true;
+  String _filterStatus = "All"; // Filter state: All, Present, Absent, WFH
 
   DateTime _currentTime = DateTime.now();
   Timer? _timer;
@@ -166,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadCelebrations() async {
     try {
       final response = await http.get(
-        Uri.parse('https://dev-workforce.dsignzmedia.com/api/active'),
+        Uri.parse('https://workforce.dsignzmedia.com/api/active'),
       );
 
       if (response.statusCode == 200) {
@@ -217,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           .toSet();
 
       // 2. Fetch ALL Active Employees (To find Absentees)
-      final response = await http.get(Uri.parse('https://dev-workforce.dsignzmedia.com/api/active'));
+      final response = await http.get(Uri.parse('https://workforce.dsignzmedia.com/api/active'));
       List<Attendance> allEmployees = [];
       
       if (response.statusCode == 200) {
@@ -550,18 +551,81 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // --- UI HELPERS ---
   Widget _buildRecentActivity() {
+    // 1. apply filter
+    List<Attendance> filteredList = _activeRecords.where((r) {
+      String clockIn = r.clock_in;
+      final hasClockIn = clockIn.isNotEmpty && clockIn != "null" && clockIn != "00:00:00";
+      
+      String status = "Absent";
+      if (r.status == "work_from_home") {
+        status = "WFH";
+      } else if (hasClockIn) {
+        status = "Present";
+      }
+
+      if (_filterStatus == "All") return true;
+      return status == _filterStatus;
+    }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Recent Activity", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Row(
+          children: [
+            const Text("Recent Activity", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 15),
+            // Filter Row (Compact)
+            Row(
+              children: [
+                _buildFilterButton("All", Colors.grey),
+                const SizedBox(width: 12),
+                _buildFilterButton("Present", primary),
+                const SizedBox(width: 12),
+                _buildFilterButton("Absent", Colors.redAccent),
+                const SizedBox(width: 12),
+                _buildFilterButton("WFH", Colors.blue),
+              ],
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
         if (_isLoadingActivity) 
           const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator(color: primary)))
-        else if (_activeRecords.isEmpty)
-          const Padding(padding: EdgeInsets.all(20), child: Center(child: Text("No activity yet today", style: TextStyle(color: textMuted))))
+        else if (filteredList.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(20), 
+            child: Center(child: Text("No $_filterStatus activity yet", style: const TextStyle(color: textMuted)))
+          )
         else
-          ..._activeRecords.map(_buildActivityItem),
+          ...filteredList.map(_buildActivityItem),
       ],
+    );
+  }
+
+  Widget _buildFilterButton(String label, Color color) {
+    bool isActive = _filterStatus == label;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _filterStatus = label;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isActive ? color.withOpacity(0.2) : Colors.transparent,
+          border: Border.all(color: isActive ? color : Colors.white24),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label == "Present" ? "P" : label == "Absent" ? "Ab" : label, // Short labels
+          style: TextStyle(
+            color: isActive ? color : textMuted, 
+            fontSize: 12, 
+            fontWeight: isActive ? FontWeight.bold : FontWeight.normal
+          ),
+        ),
+      ),
     );
   }
 
