@@ -18,7 +18,7 @@ class ApiService {
   //static const String _baseUrl = "https://workforceapi.dsignzmedia.com";
   //static const String _baseUrl = "http://192.168.1.102:5000";
   //static const String _baseUrl = "https://dev-workforceapi.dsignzmedia.com";
-  static const String _baseUrl = "http://192.168.29.216:5000";
+  static const String _baseUrl = "http://192.168.68.65:5000";
 
   static Future<Map<String, dynamic>> recognizeFace(
     String base64Image,
@@ -320,8 +320,30 @@ class ApiService {
               if (data['notices'] != null && data['notices'] is List) {
                 final notices = data['notices'] as List;
                 if (notices.isNotEmpty) {
+                  // Filter expired notices
+                  final now = DateTime.now();
+                  final validNotices = notices.where((notice) {
+                    final expiryDateStr = notice['expiry_date']?.toString();
+                    if (expiryDateStr != null && expiryDateStr.isNotEmpty) {
+                      try {
+                        // Handle formatting like "2026-02-11 03:56:00" -> "2026-02-11T03:56:00"
+                        final expiryDate = DateTime.parse(expiryDateStr.replaceAll(" ", "T"));
+                        return expiryDate.isAfter(now);
+                      } catch (e) {
+                        print("⚠️ [API] Error parsing expiry date '$expiryDateStr': $e");
+                        return true; // Keep if parse fails
+                      }
+                    }
+                    return true; // No expiry date -> assume valid
+                  }).toList();
+
+                  if (validNotices.isEmpty) {
+                    print("⚠️ [API] All notices are expired.");
+                    return null;
+                  }
+
                   // Sort notices by created_at timestamp (most recent first)
-                  final sortedNotices = List<Map>.from(notices);
+                  final sortedNotices = List<Map>.from(validNotices);
                   sortedNotices.sort((a, b) {
                     try {
                       final dateA = a['display_date']?.toString() ?? "";

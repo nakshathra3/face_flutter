@@ -283,18 +283,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _loadNoticeboard() async {
     try {
       final data = await ApiService.fetchNoticeboard();
-      if (data != null && mounted) {
-        String? apiMessage = data['description'];
-        String? apiAuthor = data['name'];
-
+      if (mounted) {
         setState(() {
-          if (apiMessage != null && apiMessage.trim().isNotEmpty) {
-            // Real Notification from API
-            _noticeMessage = apiMessage;
-            _noticeAuthor = apiAuthor ?? "";
-            _isApiNotification = true;
+          if (data != null) {
+            String? apiMessage = data['description'];
+            String? apiAuthor = data['name'];
+
+            if (apiMessage != null && apiMessage.trim().isNotEmpty) {
+              // Real Notification from API
+              _noticeMessage = apiMessage;
+              _noticeAuthor = apiAuthor ?? "";
+              _isApiNotification = true;
+            } else {
+              // Fallback to Daily Quote (if API message is empty)
+              _isApiNotification = false;
+              final int quoteIndex = DateTime.now().day % _fallbackQuotes.length;
+              _noticeMessage = _fallbackQuotes[quoteIndex];
+              _noticeAuthor = "";
+            }
           } else {
-            // ⚡ CHANGED: Fallback to Daily Quote (if API is empty)
+            // Fallback to Daily Quote (if API returns null - e.g. all expired)
             _isApiNotification = false;
             final int quoteIndex = DateTime.now().day % _fallbackQuotes.length;
             _noticeMessage = _fallbackQuotes[quoteIndex];
