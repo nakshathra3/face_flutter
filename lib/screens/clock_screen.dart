@@ -188,6 +188,12 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    
+    // Auto-select "Clock Out" if it's 6 PM or later
+    if (DateTime.now().hour >= 18) {
+       _activeTab = "out";
+    }
+    
     WidgetsBinding.instance.addObserver(this);
     _startClock();
     _initCamera();
@@ -218,7 +224,13 @@ class _ClockScreenState extends State<ClockScreen> with WidgetsBindingObserver {
   void _startClock() {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
-        setState(() => _now = DateTime.now());
+        setState(() {
+          _now = DateTime.now();
+          // Auto switch to Clock Out at exactly 6 PM (18:00:00)
+          if (_now.hour == 18 && _now.minute == 0 && _now.second == 0) {
+            _activeTab = "out";
+          }
+        });
       }
     });
   }
